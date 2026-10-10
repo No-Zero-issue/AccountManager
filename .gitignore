@@ -1,0 +1,41 @@
+# 构建产物
+x64/
+AccountManager/x64/
+**/out/
+**/*.pdb
+**/*.exe
+**/*.obj
+**/*.res
+.vs/
+packages/
+
+# 前端
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Android（android/.gitignore 里另有细则）
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+
+# 私密文件：绝不提交
+vault.json
+hello.json
+config.json
+steam_enroll.log
+*.log
+android/keystore.properties
+android/keystore/*.jks
+*.jks
+*.keystore
+
+# 系统/编辑器
+Thumbs.db
+desktop.ini
+*.user
+*.suo
+# 临时文件
+_msg.txt

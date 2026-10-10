@@ -1,0 +1,13 @@
+# 机器相关配置（含本机 Android SDK 路径，不应提交）
+local.properties
+
+# 构建产物与缓存
+build/
+.gradle/
+
+# Android Studio
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
