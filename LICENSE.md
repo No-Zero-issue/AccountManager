@@ -2,8 +2,6 @@
 
 Copyright (C) 2026 Account Manager 开发者
 
-[Youzi](https://github.com/you-zi233)与[Sakiora](https://github.com/Sakiora)共同开发
-
 本程序是自由软件：你可以依据自由软件基金会发布的 **GNU 通用公共许可证**（GNU General Public License）第 3 版，或（按你的选择）任何更新版本的条款，重新分发和/或修改它。
 
 本程序的分发是希望它有用，但**不提供任何担保**，甚至不提供适销性或特定用途适用性的默示担保。详见下方的 GNU 通用公共许可证全文。

@@ -1,0 +1,5 @@
+初始化：桌面端密码管理器 + Android Steam 令牌生成器
+
+- 桌面端（Win32 C++ + WebView2 + Vue 3）：主密码/AES-256-GCM 保险库、Windows Hello 解锁、Steam 一键登录、应用内添加/移除令牌、导出二维码
+- Android（Kotlin）：多账号令牌、Keystore 加密存储、粘贴/.maFile/otpauth/图片二维码/相机扫码导入
+- 单元测试 13 个（含与 PC 端一致的 7 组验证向量）
