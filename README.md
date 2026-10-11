@@ -155,6 +155,8 @@ gradlew -p android testDebugUnitTest assembleRelease
 
 当前版本 **1.0** · 许可 **GPL-3.0-only**（第三方组件见 [LICENSE.md](LICENSE.md)）· 仓库 <https://github.com/No-Zero-issue/AccountManager>
 
+桌面端所有状态集中在 EXE 同目录的**单个 `AccountManager.json`**（分区：`vault` / `hello` / `config`）。首次运行若检测到旧的 `vault.json` / `hello.json` / `config.json`，会自动合并进去；**旧文件保留不删**，可随时回滚。
+
 产物：`x64/Release/AccountManager.exe`（桌面端）、`android/app/build/outputs/apk/release/2FA.apk`（手机端）
 
 > 改过 `frontend/src` 后需 `npm.cmd run build` 并触碰 `AccountManager/AccountManager.rc` 再编译 —— MSBuild 增量构建不会自动重编内嵌页面的资源。
