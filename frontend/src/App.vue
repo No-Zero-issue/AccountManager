@@ -203,37 +203,83 @@ const vaultSnapshot = () => JSON.stringify({
 
 // ---- 拖动排序（桌面端表格行）----
 // 顺序即 entries 数组顺序，拖完直接持久化进保险库
-const draggingId = ref(null);
-const dragOverId = ref(null);
+// 拖动中的反馈：被拖的行留一个半透明残影，目标位置用一个虚线空槽实时预览，
+// 空槽上下的行被实时挤开；鼠标位置跨过某行中线时空槽才换位（自带迟滞，不抖）
+const draggingId = ref(null);      // 正在拖动的行（逻辑用，立刻置位）
+const dragGhostId = ref(null);     // 残影样式（晚一帧置位，避免残影被截进拖动预览图）
+const dragGapPos = ref(-1);        // 空槽位置：filteredEntries 的下标，-1 表示不显示
 
 const onRowDragStart = (entry, event) => {
   draggingId.value = entry.id;
+  const from = filteredEntries.value.findIndex((x) => x.id === entry.id);
+  dragGapPos.value = from < 0 ? -1 : from;
   if (event && event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', String(entry.id));
+    // 浏览器默认只拿手柄那一小块当预览，这里换成整行跟着鼠标走
+    const row = event.currentTarget ? event.currentTarget.closest('tr') : null;
+    if (row) {
+      try {
+        const rect = row.getBoundingClientRect();
+        event.dataTransfer.setDragImage(row, event.clientX - rect.left, event.clientY - rect.top);
+      } catch (e) {
+        // 拖动预览图设置失败不影响排序本身
+      }
+    }
   }
+  // 预览图是在 dragstart 之后立刻截的，等一帧再上残影样式，免得预览图也是半透明
+  requestAnimationFrame(() => { dragGhostId.value = entry.id; });
 };
 
-const onRowDragOver = (entry) => {
-  if (draggingId.value === null || entry.id === draggingId.value) return;
-  dragOverId.value = entry.id;
+// 鼠标在当前行的上半 / 下半，决定空槽插在这一行之前还是之后
+const onRowDragOverIndex = (index, event) => {
+  if (draggingId.value === null) return;
+  const row = event.currentTarget;
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  if (!row) return;
+  const rect = row.getBoundingClientRect();
+  const before = event.clientY < rect.top + rect.height / 2;
+  dragGapPos.value = before ? index : index + 1;
+};
+
+// 鼠标落在空槽或表格空白处时，只是允许放置，不改空槽位置
+const onTableDragOver = (event) => {
+  if (draggingId.value !== null && event.dataTransfer) event.dataTransfer.dropEffect = 'move';
 };
 
 const onRowDragEnd = () => {
   draggingId.value = null;
-  dragOverId.value = null;
+  dragGhostId.value = null;
+  dragGapPos.value = -1;
 };
 
-const onRowDrop = (target) => {
+const onRowDrop = () => {
+  const movedId = draggingId.value;
   const list = entries.value;
-  const from = list.findIndex((x) => x.id === draggingId.value);
-  const to = list.findIndex((x) => x.id === target.id);
-  if (from < 0 || to < 0 || from === to) { onRowDragEnd(); return; }
-  const next = list.slice();
-  const [moved] = next.splice(from, 1);
-  next.splice(to, 0, moved);
-  entries.value = next;
+  const from = list.findIndex((x) => x.id === movedId);
+  if (from < 0) { onRowDragEnd(); return; }
+
+  // 按当前空槽位置算出落点（用可见列表算，兼容搜索 / 分类筛选）
+  const visible = filteredEntries.value;
+  const ghostPos = visible.findIndex((x) => x.id === movedId);
+  const rest = visible.filter((x) => x.id !== movedId);   // 去掉被拖项之后的可见顺序
+  const gapPos = dragGapPos.value < 0 ? ghostPos : dragGapPos.value;
+  let insert = gapPos > ghostPos ? gapPos - 1 : gapPos;
+  insert = Math.max(0, Math.min(insert, rest.length));
+
+  const moved = list[from];
+  const next = list.filter((x) => x.id !== movedId);
+  if (insert >= rest.length) {
+    next.push(moved);                                     // 落到最后
+  } else {
+    const at = next.findIndex((x) => x.id === rest[insert].id);   // 插在这一项之前
+    next.splice(at < 0 ? next.length : at, 0, moved);
+  }
+
+  const changed = next.some((x, i) => x.id !== list[i].id);
   onRowDragEnd();
+  if (!changed) return;
+  entries.value = next;
   saveEntries();
 };
 
@@ -2168,9 +2214,11 @@ onUnmounted(() => {
                   <th style="width: 120px">备注</th>
                 </tr>
               </thead>
-              <tbody>
-                <tr v-for="entry in filteredEntries" :key="entry.id"
-                    :class="{ 'is-selected': selectedIds.has(entry.id), 'row-dragging': draggingId === entry.id, 'row-drag-over': dragOverId === entry.id }" @dragover.prevent="onRowDragOver(entry)" @drop.prevent="onRowDrop(entry)" @dragend="onRowDragEnd"
+              <tbody @dragover.prevent="onTableDragOver" @drop.prevent="onRowDrop" @dragend="onRowDragEnd">
+                <template v-for="(entry, index) in filteredEntries" :key="entry.id">
+                <tr v-if="dragGapPos === index" class="drag-gap-row"><td colspan="8"><div class="drag-gap-box"></div></td></tr>
+                <tr
+                    :class="{ 'is-selected': selectedIds.has(entry.id), 'row-dragging': dragGhostId === entry.id }" @dragover.prevent="onRowDragOverIndex(index, $event)"
                     @click="selectEntry(entry.id, $event)"
                     @contextmenu="openContextMenu($event, entry)">
                     <td class="drag-cell">
@@ -2227,6 +2275,8 @@ onUnmounted(() => {
                     <input v-model="entry.notes" class="edit-input" placeholder="点击编辑备注..." />
                   </td>
                 </tr>
+                </template>
+                <tr v-if="draggingId !== null && dragGapPos === filteredEntries.length" class="drag-gap-row"><td colspan="8"><div class="drag-gap-box"></div></td></tr>
                 <tr v-if="filteredEntries.length === 0">
                   <td colspan="8" style="text-align: center; padding: 40px; color: var(--text-muted);">
                     {{ searchQuery ? '没有匹配的记录' : '这里还没有记录，点击右上角「➕ 新增」' }}
@@ -3653,13 +3703,28 @@ onUnmounted(() => {
 
 .drag-handle:active { cursor: grabbing; }
 
-/* 拖动排序反馈 */
+/* 拖动排序反馈：被拖的行留半透明残影，目标位置用虚线空槽实时预览（其它行被挤开） */
 .data-grid tbody tr.row-dragging {
-  opacity: 0.45;
+  opacity: 0.3;
 }
 
-.data-grid tbody tr.row-drag-over {
-  box-shadow: inset 0 2px 0 var(--accent-primary);
+.data-grid tbody tr.drag-gap-row {
+  pointer-events: none;
+}
+
+.data-grid tbody tr.drag-gap-row > td {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+/* 空槽用一个有固定高度的块来撑，保证它在表格里真的占一行的高度 */
+.data-grid tbody tr.drag-gap-row .drag-gap-box {
+  height: 30px;
+  margin: 2px 0;
+  border: 1px dashed var(--accent-primary);
+  border-radius: 8px;
+  background: rgba(78, 161, 255, 0.08);
 }
 
 /* 浅色主题 */
