@@ -8,7 +8,16 @@ import java.util.Base64
  */
 object SecretParser {
 
-    data class Parsed(val name: String?, val secretBase64: String, val revocationCode: String? = null)
+    data class Parsed(
+        val name: String?,
+        val secretBase64: String,
+        val revocationCode: String? = null,
+        /** "steam" = Steam Guard（5 位字母）；"totp" = 标准 TOTP（默认 6 位数字） */
+        val type: String = "steam",
+        val digits: Int = 6,
+        val period: Int = 30,
+        val algorithm: String = "SHA1"
+    )
 
     fun parse(raw: String): Parsed {
         val text = raw.trim()
@@ -31,8 +40,22 @@ object SecretParser {
                 .firstOrNull { it.startsWith("secret=", ignoreCase = true) }
                 ?.substringAfter('=')
                 ?: throw IllegalArgumentException("otpauth 链接缺少 secret 参数")
+            fun param(key: String): String? = params.split('&')
+                .firstOrNull { it.startsWith(key + "=", ignoreCase = true) }
+                ?.substringAfter('=')
+
+            val digits = param("digits")?.toIntOrNull() ?: 6
+            val period = param("period")?.toIntOrNull() ?: 30
+            val algorithm = param("algorithm")?.uppercase() ?: "SHA1"
             val label = labelFromUri(text)
-            return Parsed(label, base32ToBase64(base32))
+            val head = text.substringBefore('?')
+            val isSteam = text.contains("issuer=Steam", ignoreCase = true) ||
+                head.contains("Steam:", ignoreCase = true) || head.endsWith("/Steam", ignoreCase = true)
+            return Parsed(
+                label, base32ToBase64(base32), null,
+                if (isSteam) "steam" else "totp",
+                digits, period, algorithm
+            )
         }
 
         // 3) 裸 Base64 shared_secret

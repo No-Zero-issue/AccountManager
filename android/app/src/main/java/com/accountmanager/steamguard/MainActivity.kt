@@ -6,6 +6,7 @@ import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.net.Uri
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
@@ -23,6 +24,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
@@ -33,7 +35,15 @@ import org.json.JSONObject
 
 class MainActivity : Activity() {
 
-    private class Entry(var name: String, var secret: String, var revocation: String? = null)
+    private class Entry(
+        var name: String,
+        var secret: String,
+        var revocation: String? = null,
+        var type: String = "steam",
+        var digits: Int = 6,
+        var period: Int = 30,
+        var algorithm: String = "SHA1"
+    )
 
     // 深色主题配色
     private val colorBg = "#101216"
@@ -97,7 +107,28 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(28), dp(16), dp(12))
         }
-        root.addView(text("Steam 令牌", 22f, colorText, bold = true))
+        // 顶栏：标题 + 右上角圆形「i」关于按钮
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        topBar.addView(text("2FA", 22f, colorText, bold = true),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        // 右上角三条杆按钮（画出来的横线，不依赖字体字形）→ 菜单：编辑卡片 / 关于
+        val menuButton = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = rounded(colorCard, 10, colorCardBorder, 1)
+            setPadding(dp(9), dp(7), dp(9), dp(7))
+        }
+        menuButton.setOnClickListener { showDropdownMenu(menuButton) }
+        repeat(3) {
+            menuButton.addView(View(this).apply { setBackgroundColor(Color.parseColor(colorText)) },
+                LinearLayout.LayoutParams(dp(18), dp(2)).apply { bottomMargin = dp(3) })
+        }
+        topBar.addView(menuButton, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)))
+        root.addView(topBar)
 
         listContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -177,12 +208,18 @@ class MainActivity : Activity() {
             bottomMargin = dp(bottomDp)
         }
 
+    /** 菜单行：扁平样式（无圆角块、无边框），按下时整行高亮 —— 类似桌面右键菜单 */
     private fun sheetRow(label: String, onClick: () -> Unit): TextView = TextView(this).apply {
         text = label
-        textSize = 16f
+        textSize = 15.5f
         setTextColor(Color.parseColor(colorText))
-        background = rounded(colorBg, 12)
-        setPadding(dp(18), dp(17), dp(18), dp(17))
+        setPadding(dp(16), dp(15), dp(16), dp(15))
+        isClickable = true
+        background = android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed),
+                android.graphics.drawable.ColorDrawable(Color.parseColor("#2c3343")))
+            addState(intArrayOf(), android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        }
         setOnClickListener { onClick() }
     }
 
@@ -205,10 +242,9 @@ class MainActivity : Activity() {
     private fun showActionsSheet() {
         showSheet("添加到令牌列表") { sheet ->
             val options = listOf<Pair<String, () -> Unit>>(
-                "✍️   手动添加" to { showAddSheet() },
-                "📷   扫描二维码" to { startScan() },
-                "🖼️   图片导入" to { pickQrImage() },
-                "ℹ️   关于" to { showAboutSheet() }
+                "手动添加" to { showAddSheet() },
+                "扫描二维码" to { startScan() },
+                "图片导入" to { pickQrImage() },
             )
             for ((label, action) in options) {
                 sheet.addView(sheetRow(label) {
@@ -221,6 +257,106 @@ class MainActivity : Activity() {
 
     /** 手动添加弹层 */
     /** 关于 */
+    /** 三条杆菜单：编辑卡片 / 关于 */
+    /** 右上角 ☰ 的下拉面板（类似微信右上角＋：圆角、图标+文字、行间分隔线） */
+    private fun showDropdownMenu(anchor: View) {
+        var popup: PopupWindow? = null
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor(colorCard))
+                cornerRadius = dp(10).toFloat()
+                setStroke(dp(1), Color.parseColor(colorCardBorder))
+            }
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        val items = listOf(
+            " " to Pair("编辑卡片") { showEditSheet() },
+            " " to Pair("关于") { showAboutSheet() }
+        )
+        items.forEachIndexed { index, item ->
+            val icon = item.first
+            val label = item.second.first
+            val action = item.second.second
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(12), dp(14), dp(12))
+                isClickable = true
+                background = android.graphics.drawable.StateListDrawable().apply {
+                    addState(intArrayOf(android.R.attr.state_pressed),
+                        ColorDrawable(Color.parseColor("#2c3343")))
+                    addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
+                }
+                setOnClickListener {
+                    popup?.dismiss()
+                    action()
+                }
+            }
+            row.addView(text(label, 15f, colorText),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            panel.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            if (index != items.lastIndex) {
+                panel.addView(View(this).apply { setBackgroundColor(Color.parseColor(colorCardBorder)) },
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                        leftMargin = dp(14)
+                        rightMargin = dp(14)
+                    })
+            }
+        }
+        popup = PopupWindow(panel, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
+            isOutsideTouchable = true
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            elevation = dp(8).toFloat()
+        }
+        // 让面板右边缘离屏幕右侧 12dp（左边缘也不越界）
+        panel.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val panelWidth = panel.measuredWidth
+        val anchorPos = IntArray(2)
+        anchor.getLocationOnScreen(anchorPos)
+        val screenWidth = resources.displayMetrics.widthPixels
+        val margin = dp(12)
+        var targetLeft = screenWidth - margin - panelWidth
+        if (targetLeft < margin) targetLeft = margin
+        popup.showAsDropDown(anchor, targetLeft - anchorPos[0], dp(6))
+    }
+
+    private fun showMenuSheet() {
+        showSheet("菜单") { sheet ->
+            sheet.addView(sheetRow("编辑卡片") {
+                sheetDialog?.dismiss()
+                showEditSheet()
+            }, fullWidthMargin(0))
+            sheet.addView(sheetRow("关于") {
+                sheetDialog?.dismiss()
+                showAboutSheet()
+            }, fullWidthMargin(0))
+        }
+    }
+
+    /** 编辑卡片：列出所有条目，点一条进入它的改名/删除/撤销码菜单 */
+    private fun showEditSheet() {
+        showSheet("编辑卡片") { sheet ->
+            if (entries.isEmpty()) {
+                sheet.addView(text("还没有卡片，先用右下角＋添加。", 14f, colorDim).apply {
+                    setPadding(dp(4), 0, dp(4), dp(12))
+                }, fullWidthMargin(0))
+            } else {
+                for (e in entries.toList()) {
+                    val kind = if (e.type == "totp") "6 位数字" else "Steam 5 位"
+                    sheet.addView(sheetRow(e.name + "    " + kind) {
+                        sheetDialog?.dismiss()
+                        showRowMenu(e)
+                    }, fullWidthMargin(8))
+                }
+            }
+        }
+    }
+
     private fun showAboutSheet() {
         val version = try {
             packageManager.getPackageInfo(packageName, 0).versionName
@@ -235,13 +371,16 @@ class MainActivity : Activity() {
                 "由 zxing / zxing-android-embedded（Apache-2.0）提供二维码能力。\n" +
                 "项目地址：github.com/No-Zero-issue/AccountManager"
             sheet.addView(text(body, 13f, colorDim).apply { setPadding(dp(4), 0, dp(4), dp(14)) }, fullWidthMargin(0))
-            val copy = button("复制项目地址", colorAccent, colorOnAccent)
-            copy.setOnClickListener {
-                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
-                    .setPrimaryClip(ClipData.newPlainText("url", "https://github.com/No-Zero-issue/AccountManager"))
-                toast("已复制")
+            val open = button("打开项目主页", colorAccent, colorOnAccent)
+            open.setOnClickListener {
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://github.com/No-Zero-issue/AccountManager")))
+                } catch (e: Exception) {
+                    toast("没有可用的浏览器")
+                }
             }
-            sheet.addView(copy, fullWidthMargin(0))
+            sheet.addView(open, fullWidthMargin(0))
         }
     }
 
@@ -307,15 +446,15 @@ class MainActivity : Activity() {
         card.addView(codeRow)
 
         val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = SteamGuard.PERIOD
-            this.progress = SteamGuard.PERIOD
+            max = e.period
+            this.progress = e.period
         }
         card.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)).apply {
             topMargin = dp(8)
         })
 
         card.setOnClickListener {
-            val code = SteamGuard.currentCode(e.secret)
+            val code = if (e.type == "totp") Totp.currentCode(e.secret, System.currentTimeMillis(), e.digits, e.period, e.algorithm) else SteamGuard.currentCode(e.secret)
             (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("steam", code))
             toast("已复制 " + code)
         }
@@ -335,15 +474,20 @@ class MainActivity : Activity() {
 
     private fun tick() {
         val now = System.currentTimeMillis()
-        val left = SteamGuard.secondsRemaining(now)
-        val seconds = left.toString() + "s"
         for (row in rows) {
-            row.code.text = SteamGuard.currentCode(row.entry.secret, now)
-            row.code.setTextColor(Color.parseColor(if (left <= 5) colorWarn else colorAccent))
-            row.remain.text = seconds
-            row.remain.setTextColor(Color.parseColor(if (left <= 5) colorWarn else colorDim))
-            row.bar.progress = left
-            row.bar.progressDrawable.setTint(Color.parseColor(if (left <= 5) colorWarn else colorAccent))
+            val period = if (row.entry.period > 0) row.entry.period else 30
+            val remain = period - ((now / 1000) % period).toInt()
+            row.code.text = if (row.entry.type == "totp")
+                Totp.currentCode(row.entry.secret, now, row.entry.digits, period, row.entry.algorithm)
+            else
+                SteamGuard.currentCode(row.entry.secret, now)
+            val tint = if (remain <= 5) colorWarn else colorAccent
+            row.code.setTextColor(Color.parseColor(tint))
+            row.remain.text = remain.toString() + "s"
+            row.remain.setTextColor(Color.parseColor(if (remain <= 5) colorWarn else colorDim))
+            row.bar.max = period
+            row.bar.progress = remain
+            row.bar.progressDrawable.setTint(Color.parseColor(tint))
         }
         handler.postDelayed({ tick() }, 1000)
     }
@@ -356,7 +500,14 @@ class MainActivity : Activity() {
             val arr = JSONArray(plain)
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
-                entries.add(Entry(o.optString("name", "未命名"), o.getString("secret"), o.optString("revocation").ifEmpty { null }))
+                val name = o.optString("name", "未命名")
+                val secret = o.getString("secret")
+                val revocation = o.optString("revocation").ifEmpty { null }
+                entries.add(Entry(name, secret, revocation,
+                    o.optString("type", "steam"),
+                    o.optInt("digits", 6),
+                    o.optInt("period", 30),
+                    o.optString("algorithm", "SHA1")))
             }
         } catch (e: Exception) {
             toast("本地数据解析失败，已忽略")
@@ -369,7 +520,11 @@ class MainActivity : Activity() {
             arr.put(JSONObject().apply {
                 put("name", e.name)
                 put("secret", e.secret)
-                e.revocation?.let { put("revocation", it) }
+e.revocation?.let { put("revocation", it) }
+                put("type", e.type)
+                put("digits", e.digits)
+                put("period", e.period)
+                put("algorithm", e.algorithm)
             })
         }
         try {
@@ -387,7 +542,7 @@ class MainActivity : Activity() {
                 toast("这个密钥已经添加过了")
                 return
             }
-            entries.add(Entry(name, parsed.secretBase64, parsed.revocationCode))
+            entries.add(Entry(name, parsed.secretBase64, parsed.revocationCode, parsed.type, parsed.digits, parsed.period, parsed.algorithm))
             persist()
             rebuild()
             toast("已导入：" + name)
@@ -419,17 +574,17 @@ class MainActivity : Activity() {
 
     private fun showRowMenu(e: Entry) {
         showSheet(e.name) { sheet ->
-            sheet.addView(sheetRow("✏️   重命名") {
+            sheet.addView(sheetRow("重命名") {
                 sheetDialog?.dismiss()
                 renameEntry(e)
             }, fullWidthMargin(8))
-            sheet.addView(sheetRow("🗑️   删除") {
+            sheet.addView(sheetRow("删除") {
                 sheetDialog?.dismiss()
                 confirmDelete(e)
             }, fullWidthMargin(8))
             val revocation = e.revocation
             if (revocation != null) {
-                sheet.addView(sheetRow("🔑   查看撤销码") {
+                sheet.addView(sheetRow("查看撤销码") {
                     sheetDialog?.dismiss()
                     showText("撤销码", revocation)
                 }, fullWidthMargin(8))

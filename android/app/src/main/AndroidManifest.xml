@@ -6,7 +6,7 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
-        android:label="Steam 令牌"
+        android:label="2FA"
         android:allowBackup="false"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
@@ -20,7 +20,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="Steam 令牌">
+            android:label="2FA">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
