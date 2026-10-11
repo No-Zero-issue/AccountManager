@@ -124,17 +124,10 @@ Steam 的两步验证**不是标准 TOTP**：它用 Base64 的 `shared_secret`�
 
 - **两种令牌**：Steam Guard（5 位字母）与**标准 TOTP**（6/7/8 位数字，SHA1/SHA256/SHA512）自动识别，共用倒计时与复制交互
 - 卡片式列表：大号动态码 + 剩余秒数 + 进度条（≤5 秒变橙），点卡片复制，长按改名 / 删除 / 看撤销码
+- **拖动排序**：卡片数字右侧有自绘拖动手柄，按住即可拖动改顺序 —— 拖动时被拖卡片**跟手浮动**、原位置塌成空槽、目标位置实时预览，其它卡片**实时让位**，松手立即写入加密存储；右上角菜单「编辑卡片」里同样用这套拖动交互
 - 右上角三条杆菜单：编辑卡片 / 关于；右下角圆形＋：手动添加 / 扫描二维码 / 图片导入
-- 右下角圆形＋ → 手动添加 / 扫描二维码 / 图片导入（支持 Base64、`.maFile`、`otpauth://`、二维码四种来源）
 - 密钥用 **Android Keystore + AES-256-GCM** 加密存本机（`filesDir/entries.bin`），「关于」页显示版本与项目地址
-- 算法与桌面端一致（HMAC-SHA1 + 26 字母表取 5 位），13 个单测含 7 组与桌面端相同的固定向量
-
-```
-gradlew -p android testDebugUnitTest assembleDebug    # → app/build/outputs/apk/debug/
-gradlew -p android assembleRelease                    # → app/build/outputs/apk/release/（已签名）
-```
-
-> 调试版与发布版签名不同，不能互相覆盖安装；签名密钥库不在版本控制中，请自行备份。
+- 算法与桌面端一致（HMAC-SHA1 + 26 字母表取 5 位），17 个单测含与桌面端相同的固定向量
 
 ```
 # 测试 + 调试版
@@ -146,7 +139,9 @@ gradlew -p android testDebugUnitTest assembleRelease
 #   → android/app/build/outputs/apk/release/app-release.apk
 ```
 
-单元测试 13 个用例：7 组与桌面端一致的固定向量、字母表/时间窗/周期、`.maFile`/Base64/otpauth 解析、非法输入拒绝、二维码「编码→解码」往返。
+> 调试版与发布版签名不同，不能互相覆盖安装；签名密钥库不在版本控制中，请自行备份。
+
+单元测试 17 个用例：与桌面端一致的固定向量、字母表 / 时间窗 / 周期、标准 TOTP 的 RFC 6238 向量、`.maFile`/Base64/otpauth 解析、非法输入拒绝、二维码「编码→解码」往返。
 
 > 注意：调试版与发布版**签名不同，无法互相覆盖安装**；换签名安装需先卸载（会清空 App 内数据）。
 > 签名密钥库不在版本控制中（`.gitignore` 有意排除），请自行备份 `android/keystore/release.jks` 与密码。

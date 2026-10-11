@@ -7,8 +7,13 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Point
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
@@ -64,10 +69,29 @@ class MainActivity : Activity() {
     /** 一行卡片里需要每帧刷新的控件 */
     private class Row(val code: TextView, val remain: TextView, val bar: ProgressBar, val entry: Entry)
     private val handler = Handler(Looper.getMainLooper())
+    /** 唯一的每秒刷新循环：避免每次重建界面都新起一个循环 */
+    private val ticker = object : Runnable {
+        override fun run() {
+            tick()
+            handler.postDelayed(this, 1000)
+        }
+    }
     private lateinit var store: SecretStore
     private lateinit var listContainer: LinearLayout
     private var sheetDialog: Dialog? = null
-    private var dragFromIndex = -1
+
+    // ---- 拖动排序状态（方案 B：跟手浮层 + 原位空槽 + 实时挤压） ----
+    /** 正在被拖动的条目 */
+    private var dragEntry: Entry? = null
+    /** 被拖动条目的槽位：保持挂载，只把高度收成 0（移除视图会让系统取消拖动） */
+    private var dragSlot: View? = null
+    /** 目标位置的空槽：它在列表里实时移动，其它卡片被挤开 */
+    private var dragGap: View? = null
+    /** 空槽当前代表的下标（不含被拖卡片本身） */
+    private var dragIndex = -1
+    private var dragMoved = false
+    /** 拖动结束后刷新界面（顺序有变化时才调用） */
+    private var dragOnDone: (() -> Unit)? = null
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
@@ -137,10 +161,11 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(12), 0, dp(96))   // 给右下角悬浮按钮留位置
         }
+        enableDragSort(listContainer)
         root.addView(ScrollView(this).apply { addView(listContainer) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-        root.addView(text("点卡片复制动态码 · 长按改名/删除", 11f, colorDim).apply {
+        root.addView(text("点卡片复制动态码 · 长按改名/删除 · 按住右侧手柄拖动排序", 11f, colorDim).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(6), 0, 0)
         })
@@ -165,6 +190,7 @@ class MainActivity : Activity() {
         }
         setContentView(frame)
         rebuild()
+        handler.post(ticker)
     }
 
     // ---------------- 底部弹层 ----------------
@@ -258,10 +284,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /** 手动添加弹层 */
-    /** 关于 */
-    /** 三条杆菜单：编辑卡片 / 关于 */
-    /** 右上角 ☰ 的下拉面板（类似微信右上角＋：圆角、图标+文字、行间分隔线） */
+    /** 右上角三条杆的下拉面板（圆角、行间分隔线） */
     private fun showDropdownMenu(anchor: View) {
         var popup: PopupWindow? = null
         val panel = LinearLayout(this).apply {
@@ -273,14 +296,13 @@ class MainActivity : Activity() {
             }
             setPadding(0, dp(6), 0, dp(6))
         }
-        val items = listOf(
-            " " to Pair("编辑卡片") { showEditSheet() },
-            " " to Pair("关于") { showAboutSheet() }
+        val items = listOf<Pair<String, () -> Unit>>(
+            "编辑卡片" to { showEditSheet() },
+            "关于" to { showAboutSheet() }
         )
         items.forEachIndexed { index, item ->
-            val icon = item.first
-            val label = item.second.first
-            val action = item.second.second
+            val label = item.first
+            val action = item.second
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -328,53 +350,20 @@ class MainActivity : Activity() {
         popup.showAsDropDown(anchor, targetLeft - anchorPos[0], dp(6))
     }
 
-    private fun showMenuSheet() {
-        showSheet("菜单") { sheet ->
-            sheet.addView(sheetRow("编辑卡片") {
-                sheetDialog?.dismiss()
-                showEditSheet()
-            }, fullWidthMargin(0))
-            sheet.addView(sheetRow("关于") {
-                sheetDialog?.dismiss()
-                showAboutSheet()
-            }, fullWidthMargin(0))
-        }
-    }
-
-    /** 编辑卡片：列出所有条目，点一条进入它的改名/删除/撤销码菜单 */
-    /** 编辑卡片：点一行进入改名/删除菜单；长按一行可上下拖动排序（松手即保存顺序）*/
-    /** 编辑卡片：左侧手柄按住可拖动排序；点文字进入改名/删除菜单 */
+    /** 编辑卡片：左侧手柄按住拖动排序（跟手浮层 + 空槽预览，松手即保存）；点文字进入改名/删除菜单 */
     private fun showEditSheet() {
         showSheet("编辑卡片（按住左侧手柄拖动排序）") { sheet ->
+            val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            enableDragSort(box)
             if (entries.isEmpty()) {
-                sheet.addView(text("还没有卡片，先用右下角＋添加。", 14f, colorDim).apply {
+                box.addView(text("还没有卡片，先用右下角＋添加。", 14f, colorDim).apply {
                     setPadding(dp(4), 0, dp(4), dp(12))
                 }, fullWidthMargin(0))
             } else {
-                entries.forEachIndexed { index, e ->
+                entries.forEach { e ->
                     val kind = if (e.type == "totp") "6 位数字" else "Steam 5 位"
 
-                    // 拖动手柄：两条横线（自绘，不依赖字体）
-                    val handle = LinearLayout(this).apply {
-                        orientation = LinearLayout.VERTICAL
-                        gravity = Gravity.CENTER
-                        setPadding(dp(14), dp(12), dp(10), dp(12))
-                        repeat(2) {
-                            addView(View(this@MainActivity).apply {
-                                setBackgroundColor(Color.parseColor(colorDim))
-                            }, LinearLayout.LayoutParams(dp(16), dp(2)).apply { bottomMargin = dp(4) })
-                        }
-                        setOnTouchListener { v, ev ->
-                            if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
-                                dragFromIndex = index
-                                v.startDragAndDrop(null, View.DragShadowBuilder(v), index, 0)
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                    }
-
+                    val handle = dragHandle()
                     val label = text(e.name + "    " + kind, 15.5f, colorText).apply {
                         setPadding(dp(4), dp(14), dp(14), dp(14))
                         isClickable = true
@@ -387,46 +376,26 @@ class MainActivity : Activity() {
                     val row = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
                         gravity = Gravity.CENTER_VERTICAL
-                        addView(handle, LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                        addView(handle, LinearLayout.LayoutParams(dp(46), dp(44)))
                         addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                        setOnDragListener { _, event ->
-                            when (event.action) {
-                                DragEvent.ACTION_DRAG_ENTERED -> {
-                                    setBackgroundColor(Color.parseColor("#2c3343"))
-                                    true
-                                }
-                                DragEvent.ACTION_DRAG_EXITED -> {
-                                    setBackgroundColor(Color.TRANSPARENT)
-                                    true
-                                }
-                                DragEvent.ACTION_DROP -> {
-                                    moveEntry(dragFromIndex, index)
-                                    sheetDialog?.dismiss()
-                                    showEditSheet()
-                                    true
-                                }
-                                else -> true
+                    }
+                    handle.setOnTouchListener { _, ev ->
+                        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+                            beginSlotDrag(box, row, e, ev) {
+                                sheetDialog?.dismiss()
+                                showEditSheet()
                             }
+                        } else {
+                            false
                         }
                     }
-                    sheet.addView(row, fullWidthMargin(6))
+                    box.addView(row, fullWidthMargin(6))
                 }
             }
+            sheet.addView(box, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
     }
-
-
-    /** 把 from 位置的条目移到 to 位置并持久化 */
-    private fun moveEntry(from: Int, to: Int) {
-        if (from < 0 || to < 0 || from == to) return
-        if (from >= entries.size || to >= entries.size) return
-        val moved = entries.removeAt(from)
-        entries.add(to, moved)
-        persist()
-        rebuild()
-    }
-
 
     private fun showAboutSheet() {
         val version = try {
@@ -482,6 +451,204 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---------------- 拖动排序（方案 B） ----------------
+
+    /** 方案 B 的跟手浮层：先把卡片画成位图，再放大一点点绘制，形成「浮起来」的预览 */
+    private inner class FloatingShadow(
+        private val shot: Bitmap,
+        private val touchX: Float,
+        private val touchY: Float
+    ) : View.DragShadowBuilder() {
+
+        override fun onProvideShadowMetrics(outShadowSize: Point, outShadowTouchPoint: Point) {
+            val w = (shot.width * DRAG_SCALE).toInt()
+            val h = (shot.height * DRAG_SCALE).toInt()
+            outShadowSize.set(w, h)
+            outShadowTouchPoint.set(
+                (touchX * DRAG_SCALE).toInt().coerceIn(0, w),
+                (touchY * DRAG_SCALE).toInt().coerceIn(0, h)
+            )
+        }
+
+        override fun onDrawShadow(canvas: Canvas) {
+            val w = (shot.width * DRAG_SCALE).toInt()
+            val h = (shot.height * DRAG_SCALE).toInt()
+            val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+            paint.alpha = 246
+            canvas.drawBitmap(shot, null, Rect(0, 0, w, h), paint)
+        }
+    }
+
+    /** 自绘拖动手柄：两条横线，不依赖字体字形（固定尺寸 + 自己垂直居中，避免子视图被压扁） */
+    private fun dragHandle(): View {
+        val barW = dp(18)
+        val barH = dp(2)
+        val gap = dp(5)
+        return object : View(this) {
+            private val paint = Paint().apply { color = Color.parseColor(colorDim) }
+
+            override fun onDraw(canvas: Canvas) {
+                val left = ((width - barW) / 2).toFloat()
+                val top = ((height - (barH * 2 + gap)) / 2).toFloat()
+                canvas.drawRect(left, top, left + barW, top + barH, paint)
+                canvas.drawRect(left, top + barH + gap, left + barW, top + barH + gap + barH, paint)
+            }
+        }
+    }
+
+    /** 把某个槽位的外层容器接上拖动排序（主列表 / 编辑弹层共用） */
+    private fun enableDragSort(container: LinearLayout) {
+        container.setOnDragListener { _, event -> onDragEvent(container, event) }
+    }
+
+    private fun onDragEvent(container: LinearLayout, event: DragEvent): Boolean {
+        when (event.action) {
+            DragEvent.ACTION_DRAG_STARTED -> return dragEntry != null
+            DragEvent.ACTION_DRAG_LOCATION -> {
+                if (dragEntry != null) moveGapTo(container, event.y)
+                return true
+            }
+            DragEvent.ACTION_DROP -> return true
+            DragEvent.ACTION_DRAG_ENDED -> {
+                // 松手落点在可放置区域才提交，被系统取消则回到原顺序
+                if (dragEntry != null) finishSlotDrag(container, event.result)
+                return true
+            }
+            else -> return true
+        }
+    }
+
+    /** 把卡片截成位图，给跟手浮层用 */
+    private fun captureSlot(view: View): Bitmap? {
+        val w = view.width
+        val h = view.height
+        if (w <= 0 || h <= 0) return null
+        return try {
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { view.draw(Canvas(it)) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 从手柄发起拖动：
+     * 卡片本身跟手浮动（方案 B），原位塌陷成空位，目标位置用空槽预览，其它卡片实时让位。
+     */
+    private fun beginSlotDrag(container: LinearLayout, slot: View, e: Entry, ev: MotionEvent, onDone: () -> Unit): Boolean {
+        val from = entries.indexOf(e)
+        if (from < 0) return false
+
+        val loc = IntArray(2)
+        slot.getLocationOnScreen(loc)
+        val shot = captureSlot(slot)
+        val shadow = if (shot != null)
+            FloatingShadow(shot, ev.rawX - loc[0], ev.rawY - loc[1])
+        else
+            View.DragShadowBuilder(slot)
+
+        val gap = View(this).apply {
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#141821"))
+                cornerRadius = dp(14).toFloat()
+                setStroke(dp(1), Color.parseColor("#39435a"))
+            }
+        }
+        val gapLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, slot.height)
+        (slot.layoutParams as? LinearLayout.LayoutParams)?.let {
+            gapLp.topMargin = it.topMargin
+            gapLp.bottomMargin = it.bottomMargin
+        }
+
+        dragEntry = e
+        dragSlot = slot
+        dragGap = gap
+        dragIndex = from
+        dragMoved = false
+        dragOnDone = onDone
+
+        if (!slot.startDragAndDrop(null, shadow, e, 0)) {
+            dragEntry = null
+            dragSlot = null
+            dragGap = null
+            dragIndex = -1
+            dragOnDone = null
+            return false
+        }
+
+        // 目标位置的空槽先落在原位，随后跟着手指走
+        container.addView(gap, (container.indexOfChild(slot) + 1).coerceAtMost(container.childCount), gapLp)
+        // 源槽塌陷：视图保持挂载，只把高度收成 0，避免拖动被系统取消
+        slot.visibility = View.INVISIBLE
+        slot.layoutParams = slot.layoutParams.apply { height = 0 }
+        slot.requestLayout()
+        return true
+    }
+
+    /** 手指移动时把空槽挪到对应位置，其它卡片自动让位（实时挤压） */
+    private fun moveGapTo(container: LinearLayout, fingerY: Float) {
+        val slot = dragSlot ?: return
+        val gap = dragGap ?: return
+        if (gap.parent !== container) return
+
+        var k = 0
+        for (i in 0 until container.childCount) {
+            val c = container.getChildAt(i)
+            if (c === gap || c === slot) continue
+            if (fingerY > c.top + c.height / 2f) k++
+        }
+        if (k == dragIndex) return
+
+        // 目标下标按「不含被拖卡片」的顺序计算
+        val others = ArrayList<View>(container.childCount)
+        for (i in 0 until container.childCount) {
+            val c = container.getChildAt(i)
+            if (c !== gap && c !== slot) others.add(c)
+        }
+        if (k > others.size) k = others.size
+
+        dragIndex = k
+        dragMoved = true
+        container.removeView(gap)
+        if (k < others.size) container.addView(gap, container.indexOfChild(others[k])) else container.addView(gap)
+    }
+
+    /** 结束拖动：撤掉空槽、恢复源槽；顺序变了就保存并刷新 */
+    private fun finishSlotDrag(container: LinearLayout, drop: Boolean) {
+        val e = dragEntry
+        val slot = dragSlot
+        val gap = dragGap
+        val target = dragIndex
+        val moved = dragMoved
+
+        dragEntry = null
+        dragSlot = null
+        dragGap = null
+        dragIndex = -1
+        dragMoved = false
+
+        if (gap != null && gap.parent === container) container.removeView(gap)
+        if (slot != null) {
+            slot.visibility = View.VISIBLE
+            slot.alpha = 1f
+            slot.layoutParams = slot.layoutParams.apply { height = ViewGroup.LayoutParams.WRAP_CONTENT }
+            slot.requestLayout()
+        }
+
+        var changed = false
+        if (drop && moved && e != null && target >= 0) {
+            val from = entries.indexOf(e)
+            if (from >= 0 && target != from) {
+                entries.removeAt(from)
+                entries.add(target.coerceIn(0, entries.size), e)
+                persist()
+                changed = true
+            }
+        }
+        val done = dragOnDone
+        dragOnDone = null
+        if (changed) done?.invoke()
+    }
+
     // ---------------- 列表 ----------------
 
     private fun rebuild() {
@@ -494,7 +661,11 @@ class MainActivity : Activity() {
             })
         }
         for (e in entries) {
-            listContainer.addView(buildCard(e))
+            val slot = buildCard(e)
+            listContainer.addView(slot, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(10)
+            })
         }
         tick()
     }
@@ -512,8 +683,19 @@ class MainActivity : Activity() {
         codeView.letterSpacing = 0.12f
         val leftView = text("30s", 13f, colorDim)
         leftView.gravity = Gravity.END
+        // 数字旁边的拖动手柄：按住它直接拖动排序
+        val handle = dragHandle().apply {
+            setOnTouchListener { _, ev ->
+                if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+                    beginSlotDrag(listContainer, card, e, ev) { rebuild() }
+                } else {
+                    false
+                }
+            }
+        }
         codeRow.addView(codeView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         codeRow.addView(leftView)
+        codeRow.addView(handle, LinearLayout.LayoutParams(dp(46), dp(40)))
         card.addView(codeRow)
 
         val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -536,11 +718,7 @@ class MainActivity : Activity() {
 
         rows.add(Row(codeView, leftView, progress, e))
 
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 0, 0, dp(10))
-            addView(card)
-        }
+        return card
     }
 
     private fun tick() {
@@ -560,7 +738,6 @@ class MainActivity : Activity() {
             row.bar.progress = remain
             row.bar.progressDrawable.setTint(Color.parseColor(tint))
         }
-        handler.postDelayed({ tick() }, 1000)
     }
 
     // ---------------- 数据 ----------------
@@ -722,6 +899,8 @@ e.revocation?.let { put("revocation", it) }
 
     companion object {
         private const val REQ_PICK_QR = 1001
+        /** 跟手浮层的放大比例，视觉上「浮起来」 */
+        private const val DRAG_SCALE = 1.03f
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
