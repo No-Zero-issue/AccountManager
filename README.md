@@ -123,26 +123,20 @@ Steam 的两步验证**不是标准 TOTP**：它用 Base64 的 `shared_secret`�
 
 ## Android 手机端（Steam 令牌生成器）
 
-目录 `android/`，独立的 Kotlin 应用，**不联网、不碰账号**，只负责保存密钥并出码。已与桌面端配合跑通「PC 导出二维码 → 手机导入」的完整闭环。
+目录 `android/`，独立 Kotlin 应用：**不联网、不碰账号**，只保存密钥并出码。
 
-功能：
-
-- 多账号卡片：34sp 大号 **5 位 Steam Guard 动态码**、右侧**剩余秒数倒计时**、下方进度条；**≤5 秒时号码/秒数/进度条一起变橙**
-- **点卡片即复制**动态码；**长按卡片**弹出底部弹层：重命名 / 删除 / 查看撤销码（含复制）
-- 右下角**圆形悬浮按钮（＋）** → 底部弹层选择：**手动添加 / 扫描二维码 / 图片导入**
-- 导入四种来源：粘贴 **Base64 `shared_secret`**、**`.maFile` JSON**、**`otpauth://` 链接**（三种都可从「手动添加」直接粘贴）、**二维码**（相机实时扫描，或从相册/截图选图解码）
-- 「ℹ️ 关于」：显示版本、许可、项目地址，并可一键复制项目地址
-- 五种导入统一走同一个解析器，重复密钥自动拒绝
-
-密钥存储：**AES-256-GCM**，密钥由 **Android Keystore** 生成并保管（App 读不到明文密钥），文件为 `filesDir/entries.bin`（`[IV长度][IV][密文]`）；解密失败按空库处理，不会崩溃。
-
-算法与桌面端完全一致（桌面端曾与 node-steam-totp 做 200 组随机差分）：HMAC-SHA1 + 26 字母表 `23456789BCDFGHJKMNPQRTVWXY` 取 5 位。为便于纯 JVM 测试，算法与解析器**不依赖任何 Android API**（Base64 用 `java.util.Base64`，minSdk 26）。
-
-二维码能力：[ZXing core](https://github.com/zxing/zxing)（Apache-2.0）负责编解码，[zxing-android-embedded](https://github.com/journeyapps/zxing-android-embedded)（Apache-2.0）提供相机扫描界面；其 `CaptureActivity` 的横屏声明已在清单里用 `tools:replace` 覆盖为 `fullSensor`（跟随手机方向）。
-
-构建与测试（需本机 Android SDK，`local.properties` 指向 SDK 路径）：
+- 卡片式列表：大号 5 位动态码 + 剩余秒数 + 进度条（≤5 秒变橙），点卡片复制，长按改名 / 删除 / 看撤销码
+- 右下角圆形＋ → 手动添加 / 扫描二维码 / 图片导入（支持 Base64、`.maFile`、`otpauth://`、二维码四种来源）
+- 密钥用 **Android Keystore + AES-256-GCM** 加密存本机（`filesDir/entries.bin`），「关于」页显示版本与项目地址
+- 算法与桌面端一致（HMAC-SHA1 + 26 字母表取 5 位），13 个单测含 7 组与桌面端相同的固定向量
 
 ```
+gradlew -p android testDebugUnitTest assembleDebug    # → app/build/outputs/apk/debug/
+gradlew -p android assembleRelease                    # → app/build/outputs/apk/release/（已签名）
+```
+
+> 调试版与发布版签名不同，不能互相覆盖安装；签名密钥库不在版本控制中，请自行备份。
+
 # 测试 + 调试版
 gradlew -p android testDebugUnitTest assembleDebug
 #   → android/app/build/outputs/apk/debug/app-debug.apk
@@ -159,21 +153,11 @@ gradlew -p android testDebugUnitTest assembleRelease
 
 ## 版本与发布
 
-- 当前版本：**1.0**（桌面端「关于」与状态栏、Android `versionName` 一致）
-- 仓库：<https://github.com/No-Zero-issue/AccountManager>（标签 `v1.0`）
-- 许可：**GPL-3.0-only**，第三方组件见 [LICENSE.md](LICENSE.md)
+当前版本 **1.0** · 许可 **GPL-3.0-only**（第三方组件见 [LICENSE.md](LICENSE.md)）· 仓库 <https://github.com/No-Zero-issue/AccountManager>
 
-可分发产物：
+产物：`x64/Release/AccountManager.exe`（桌面端，数据文件在 EXE 同目录）、`android/app/build/outputs/apk/release/app-release.apk`（手机端）
 
-| 平台 | 路径 | 说明 |
-|---|---|---|
-| 桌面端（发布） | `x64/Release/AccountManager.exe` | 体积小、无调试符号 |
-| 桌面端（调试） | `x64/Debug/AccountManager.exe` | 数据文件（`vault.json` / `hello.json` / `config.json`）在 EXE 同目录 |
-| Android | `android/app/build/outputs/apk/release/app-release.apk` | 已用 `android/keystore/release.jks` 签名 |
-
-> 桌面端的数据文件与 EXE **同目录**，把 EXE 换到别的目录运行会读不到原保险库。
-
-构建桌面端时注意：前端页面以资源形式嵌入 EXE，**MSBuild 增量构建不会自动重编 `.rc` 资源** —— 改过 `frontend/src` 后请先 `npm.cmd run build`，再触碰 `AccountManager/AccountManager.rc`（或清理中间产物）后重新生成，否则新界面不会进 EXE。
+> 改过 `frontend/src` 后需 `npm.cmd run build` 并触碰 `AccountManager/AccountManager.rc` 再编译 —— MSBuild 增量构建不会自动重编内嵌页面的资源。
 
 ## 许可
 本项目以 **GNU 通用公共许可证第 3 版（GPL-3.0）** 发布，Copyright (C) 2026 Account Manager 开发者。
