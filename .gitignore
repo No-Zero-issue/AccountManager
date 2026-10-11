@@ -39,3 +39,8 @@ desktop.ini
 *.suo
 # 临时文件
 _msg.txt
+
+# 临时脚本/提交信息
+_*.txt
+_*.cmd
+_*.log
