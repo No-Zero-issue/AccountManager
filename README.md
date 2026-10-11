@@ -3,6 +3,13 @@
 ## 简介
 Account Manager 是一款**本地优先的网站 / 软件密码管理器**。核心与加密逻辑由 C++（Win32 + WebView2）实现，界面使用 Vue + Vite 编写，并以单文件形式嵌入 EXE，运行时释放加载，无需外部依赖。
 
+## 预览图
+<p align="center">
+  <img src="Image/phone.png" alt="Phone" width="180">
+  &nbsp;&nbsp;
+  <img src="Image/pc.png" alt="PC" width="450">
+</p>
+
 ## 功能
 - 条目类型：🌐 网站、💻 软件、🎮 Steam 账号、📄 恢复代码
 - 条目字段：名称、类型、网址或程序路径、账号、密码、SteamID64（Steam）、TOTP 密钥、2FA 恢复代码、分类、备注
@@ -135,7 +142,7 @@ gradlew -p android testDebugUnitTest assembleDebug
 ```
 测试 13 个用例：已验证向量对照（7 组）、字母表/时间窗/周期、`.maFile`/Base64/otpauth 解析、非法输入拒绝、二维码「编码→解码」往返。
 
-与桌面端配合：桌面端条目右键 →「📱 导出二维码（给手机扫）」→ 手机端「从图片导入二维码」扫描该截图即可。
+与桌面端配合：桌面端条目右键 →「📱 导出二维码（给手机扫）」→ 手机端「扫描二维码」扫描该二维码即可。
 
 已知限制：
 - 未做交易/市场确认（不涉及 `identity_secret` 的使用）
