@@ -16,6 +16,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.view.DragEvent
+import android.view.MotionEvent
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -65,6 +67,7 @@ class MainActivity : Activity() {
     private lateinit var store: SecretStore
     private lateinit var listContainer: LinearLayout
     private var sheetDialog: Dialog? = null
+    private var dragFromIndex = -1
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
@@ -339,23 +342,91 @@ class MainActivity : Activity() {
     }
 
     /** 编辑卡片：列出所有条目，点一条进入它的改名/删除/撤销码菜单 */
+    /** 编辑卡片：点一行进入改名/删除菜单；长按一行可上下拖动排序（松手即保存顺序）*/
+    /** 编辑卡片：左侧手柄按住可拖动排序；点文字进入改名/删除菜单 */
     private fun showEditSheet() {
-        showSheet("编辑卡片") { sheet ->
+        showSheet("编辑卡片（按住左侧手柄拖动排序）") { sheet ->
             if (entries.isEmpty()) {
                 sheet.addView(text("还没有卡片，先用右下角＋添加。", 14f, colorDim).apply {
                     setPadding(dp(4), 0, dp(4), dp(12))
                 }, fullWidthMargin(0))
             } else {
-                for (e in entries.toList()) {
+                entries.forEachIndexed { index, e ->
                     val kind = if (e.type == "totp") "6 位数字" else "Steam 5 位"
-                    sheet.addView(sheetRow(e.name + "    " + kind) {
-                        sheetDialog?.dismiss()
-                        showRowMenu(e)
-                    }, fullWidthMargin(8))
+
+                    // 拖动手柄：两条横线（自绘，不依赖字体）
+                    val handle = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER
+                        setPadding(dp(14), dp(12), dp(10), dp(12))
+                        repeat(2) {
+                            addView(View(this@MainActivity).apply {
+                                setBackgroundColor(Color.parseColor(colorDim))
+                            }, LinearLayout.LayoutParams(dp(16), dp(2)).apply { bottomMargin = dp(4) })
+                        }
+                        setOnTouchListener { v, ev ->
+                            if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+                                dragFromIndex = index
+                                v.startDragAndDrop(null, View.DragShadowBuilder(v), index, 0)
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    }
+
+                    val label = text(e.name + "    " + kind, 15.5f, colorText).apply {
+                        setPadding(dp(4), dp(14), dp(14), dp(14))
+                        isClickable = true
+                        setOnClickListener {
+                            sheetDialog?.dismiss()
+                            showRowMenu(e)
+                        }
+                    }
+
+                    val row = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(handle, LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                        addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                        setOnDragListener { _, event ->
+                            when (event.action) {
+                                DragEvent.ACTION_DRAG_ENTERED -> {
+                                    setBackgroundColor(Color.parseColor("#2c3343"))
+                                    true
+                                }
+                                DragEvent.ACTION_DRAG_EXITED -> {
+                                    setBackgroundColor(Color.TRANSPARENT)
+                                    true
+                                }
+                                DragEvent.ACTION_DROP -> {
+                                    moveEntry(dragFromIndex, index)
+                                    sheetDialog?.dismiss()
+                                    showEditSheet()
+                                    true
+                                }
+                                else -> true
+                            }
+                        }
+                    }
+                    sheet.addView(row, fullWidthMargin(6))
                 }
             }
         }
     }
+
+
+    /** 把 from 位置的条目移到 to 位置并持久化 */
+    private fun moveEntry(from: Int, to: Int) {
+        if (from < 0 || to < 0 || from == to) return
+        if (from >= entries.size || to >= entries.size) return
+        val moved = entries.removeAt(from)
+        entries.add(to, moved)
+        persist()
+        rebuild()
+    }
+
 
     private fun showAboutSheet() {
         val version = try {
