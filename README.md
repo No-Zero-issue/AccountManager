@@ -79,6 +79,29 @@ Steam 的两步验证**不是标准 TOTP**：它用 Base64 的 `shared_secret`�
 - 需要设备支持 Windows Hello 且已配置 PIN / 指纹 / 人脸，否则启用时会提示不可用；
 - 如果需要更高的安全强度，可在「设置 → 关闭 Windows Hello 解锁」删除 `hello.json` 与对应凭据，改为每次输入主密码。
 
+## 代码结构
+
+C++ 侧原来是一个 3700 行的 `AccountManager.cpp`，现按功能拆到 `AccountManager/Function/`：
+
+```
+AccountManager/
+├─ AccountManager.cpp      程序入口 / 窗口过程 / WebView2 宿主 / 前端消息分发（约 920 行）
+└─ Function/
+   ├─ Function.h           内部共享头：公共 include、宏、跨文件常量/结构体/全局量/函数声明
+   ├─ Utils.cpp            字符编码 / Base64 / Hex / 随机数
+   ├─ Crypto.cpp           CNG：PBKDF2 / AES-256-CBC / HMAC-SHA256 / HKDF / RSA
+   ├─ DataStore.cpp        配置与单文件 AccountManager.json 的分区读写、旧文件迁移
+   ├─ Vault.cpp            密码保险库：密钥驻留 + 信封 + 创建/解锁/保存/改密
+   ├─ Hello.cpp            Windows Hello 解锁
+   ├─ Proto.cpp            极简 protobuf（namespace steampb）
+   ├─ Http.cpp             WinHTTP 传输层
+   ├─ Vdf.cpp              VDF 解析 + 从本机 Steam 导入账号
+   ├─ SteamClient.cpp      Steam 客户端一键登录（注册表 + 进程）
+   └─ SteamAuth.cpp        Steam 账号登录 + 应用内手机令牌
+```
+
+拆分只搬代码、不改行为：`Function.h` 里放跨文件的那点东西（`kVault*` 常量、`SteamHttpResult`、`SteamEnrollSession`、两个跨线程标志、`RunBackgroundWorker` 模板、各模块函数声明）。
+
 ## 构建
 - 需要 Visual Studio（v143 工具集，含 C++ 桌面开发负载）、Node.js，以及仓库内 `packages` 目录的 WebView2 / WIL NuGet 包
 - MSBuild 会在编译前自动执行 `npm install` 与 `npm run build`，并把 `frontend/dist` 同步到输出目录，同时作为 HTML 资源打进 EXE
