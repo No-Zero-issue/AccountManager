@@ -118,11 +118,13 @@ Steam 的两步验证**不是标准 TOTP**：它用 Base64 的 `shared_secret`�
 用途：令牌已不在你手上、或想把它从本应用彻底摘掉时，不必再碰官方 App。
 
 
-## Android 手机端（Steam 令牌生成器）
+## Android 手机端（2FA）
 
 目录 `android/`，独立 Kotlin 应用：**不联网、不碰账号**，只保存密钥并出码。
 
-- 卡片式列表：大号 5 位动态码 + 剩余秒数 + 进度条（≤5 秒变橙），点卡片复制，长按改名 / 删除 / 看撤销码
+- **两种令牌**：Steam Guard（5 位字母）与**标准 TOTP**（6/7/8 位数字，SHA1/SHA256/SHA512）自动识别，共用倒计时与复制交互
+- 卡片式列表：大号动态码 + 剩余秒数 + 进度条（≤5 秒变橙），点卡片复制，长按改名 / 删除 / 看撤销码
+- 右上角三条杆菜单：编辑卡片 / 关于；右下角圆形＋：手动添加 / 扫描二维码 / 图片导入
 - 右下角圆形＋ → 手动添加 / 扫描二维码 / 图片导入（支持 Base64、`.maFile`、`otpauth://`、二维码四种来源）
 - 密钥用 **Android Keystore + AES-256-GCM** 加密存本机（`filesDir/entries.bin`），「关于」页显示版本与项目地址
 - 算法与桌面端一致（HMAC-SHA1 + 26 字母表取 5 位），13 个单测含 7 组与桌面端相同的固定向量
@@ -153,7 +155,7 @@ gradlew -p android testDebugUnitTest assembleRelease
 
 当前版本 **1.0** · 许可 **GPL-3.0-only**（第三方组件见 [LICENSE.md](LICENSE.md)）· 仓库 <https://github.com/No-Zero-issue/AccountManager>
 
-产物：`x64/Release/AccountManager.exe`（桌面端，数据文件在 EXE 同目录）、`android/app/build/outputs/apk/release/app-release.apk`（手机端）
+产物：`x64/Release/AccountManager.exe`（桌面端）、`android/app/build/outputs/apk/release/2FA.apk`（手机端）
 
 > 改过 `frontend/src` 后需 `npm.cmd run build` 并触碰 `AccountManager/AccountManager.rc` 再编译 —— MSBuild 增量构建不会自动重编内嵌页面的资源。
 
