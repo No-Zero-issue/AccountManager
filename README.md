@@ -78,9 +78,6 @@ Steam 的两步验证**不是标准 TOTP**：它用 Base64 的 `shared_secret`�
 - 需要设备支持 Windows Hello 且已配置 PIN / 指纹 / 人脸，否则启用时会提示不可用；
 - 如果需要更高的安全强度，可在「设置 → 关闭 Windows Hello 解锁」删除 `hello.json` 与对应凭据，改为每次输入主密码。
 
-## 从 Steam 版本迁移
-首次创建保险库时，如果程序目录存在旧版的 `accounts.json`（Steam 账号格式），会自动读取其中的账号、密码、SteamID64 与状态，转换成通用条目并归入「Steam」分类导入。
-
 ## 构建
 - 需要 Visual Studio（v143 工具集，含 C++ 桌面开发负载）、Node.js，以及仓库内 `packages` 目录的 WebView2 / WIL NuGet 包
 - MSBuild 会在编译前自动执行 `npm install` 与 `npm run build`，并把 `frontend/dist` 同步到输出目录，同时作为 HTML 资源打进 EXE
@@ -95,7 +92,7 @@ Steam 的两步验证**不是标准 TOTP**：它用 Base64 的 `shared_secret`�
 - ⚠️ TOTP 密钥 / 恢复代码等同第二因素，不要粘贴到在线二维码解码网站或聊天工具。
 
 ## 应用内添加 Steam 令牌（已验证可用）
-不用 root、不用第三方工具：在 Steam 条目里点「🛡️ 应用内添加令牌」，按向导走完，本应用就能为该账号出 5 位 2FA 动态码。全部走 Steam 官方接口：
+在 Steam 条目里点「🛡️ 应用内添加令牌」，按向导走完，本应用就能为该账号出 5 位 2FA 动态码。全部走 Steam 官方接口：
 
 1. `IAuthenticationService/GetPasswordRSAPublicKey` —— **必须用 GET**，入参放在查询串的 `input_protobuf_encoded` 里（用 POST 会返回 405）
 2. Windows CNG 做 **RSA PKCS#1 v1.5** 加密密码 → `BeginAuthSessionViaCredentials` 建立登录会话
@@ -137,6 +134,7 @@ gradlew -p android assembleRelease                    # → app/build/outputs/ap
 
 > 调试版与发布版签名不同，不能互相覆盖安装；签名密钥库不在版本控制中，请自行备份。
 
+```
 # 测试 + 调试版
 gradlew -p android testDebugUnitTest assembleDebug
 #   → android/app/build/outputs/apk/debug/app-debug.apk

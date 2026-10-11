@@ -2287,7 +2287,7 @@ onUnmounted(() => {
               <div v-if="editingEntry.type === 'steam'" class="enroll-row">
                 <button class="btn btn-blue" @click="openEnrollModal(editingEntry)">🛡️ 应用内添加令牌（自动获取密钥）</button>
                 <button v-if="editingEntry.totpSecret || editingEntry.revocationCode" class="btn" @click="openEnrollModal(editingEntry, 'remove')">🗑️ 移除该账号的手机令牌</button>
-                <span class="field-hint">不用 root、不用第三方工具：登录后由 Steam 下发密钥并直接写入本条目</span>
+                <span class="field-hint">登录后由 Steam 下发密钥并直接写入本条目</span>
               </div>
             </div>
             <div class="input-group" style="grid-column: span 2;">

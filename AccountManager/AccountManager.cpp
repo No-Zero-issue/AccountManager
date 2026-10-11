@@ -254,8 +254,8 @@ json SteamLoginWorker(std::wstring username, std::wstring password) {
 }
 
 // ============================================================================
-// 配置存储（明文）：只保存主题、侧边栏等非敏感界面设置
-// ============================================================================
+
+
 std::wstring GetConfigFilePath() {
     WCHAR path[MAX_PATH];
     GetModuleFileNameW(NULL, path, MAX_PATH);
@@ -264,42 +264,25 @@ std::wstring GetConfigFilePath() {
 }
 
 // 读取配置
+// 读取配置（来自 AccountManager.json 的 config 节）
 json ReadConfigJson() {
     try {
-        std::filesystem::path path = GetConfigFilePath();
-        if (!std::filesystem::exists(path) || std::filesystem::file_size(path) == 0) {
-            return json::object();
-        }
-
-        std::ifstream file(path.wstring(), std::ios::binary);
-        if (file.is_open()) {
-            try {
-                json j;
-                file >> j;
-                file.close();
-                return j;
-            }
-            catch (const std::exception&) {
-                file.close();
-                return json::object();
-            }
-        }
+        json ReadDataSection(const std::string& name);   // 定义在下方
+        json section = ReadDataSection("config");
+        return section.is_object() ? section : json::object();
     }
     catch (...) {
         return json::object();
     }
-    return json::object();
 }
 
 // 保存配置
+// 保存配置（写入 AccountManager.json 的 config 节，其它节原样保留）
 void SaveConfigJson(const json& j) {
     try {
-        std::filesystem::path path = GetConfigFilePath();
-        std::ofstream file(path.wstring(), std::ios::out | std::ios::trunc | std::ios::binary);
-        if (file.is_open()) {
-            std::string content = j.dump(4);
-            file.write(content.c_str(), content.length());
-            file.close();
+        bool WriteDataSection(const std::string& name, const json& value);   // 定义在下方
+        if (!WriteDataSection("config", j)) {
+            throw std::runtime_error("cannot write config section");
         }
     }
     catch (const std::exception& e) {
@@ -316,7 +299,16 @@ void SaveConfigJson(const json& j) {
 //   结构   : { version, kdf:{algorithm,iterations,salt}, cipher, iv, mac, data }
 // 说明：解密用的密钥只在解锁期间驻留内存，锁定/退出时清零。
 // ============================================================================
+// 单文件数据存储：AccountManager.json（vault / hello / config 三节）
+json ReadDataSection(const std::string& name);
+bool WriteDataSection(const std::string& name, const json& value);
+bool RemoveDataSection(const std::string& name);
+bool WriteDataRoot(const json& root);
+void MigrateLegacyDataFiles();
+
 namespace {
+
+
 
 constexpr ULONGLONG kVaultKdfIterations = 200000;
 constexpr size_t kVaultAesKeySize = 32;
@@ -585,18 +577,14 @@ bool BuildVaultJson(const std::vector<BYTE>& aesKey, const std::vector<BYTE>& ma
     return true;
 }
 
+
 bool WriteVaultFile(const json& fileData, std::wstring& error) {
     try {
-        std::filesystem::path path = GetVaultFilePath();
-        std::ofstream file(path.wstring(), std::ios::out | std::ios::trunc | std::ios::binary);
-        if (!file.is_open()) {
-            error = L"cannot open vault.json for writing";
+        // 写入 AccountManager.json 的 vault 节（读-改-写，不动其它节）
+        if (!WriteDataSection("vault", fileData)) {
+            error = L"cannot write AccountManager.json vault section";
             return false;
         }
-
-        std::string content = fileData.dump(4);
-        file.write(content.c_str(), (std::streamsize)content.length());
-        file.close();
         return true;
     }
     catch (const std::exception& e) {
@@ -612,14 +600,11 @@ bool ReadVaultEnvelope(json& fileData, std::vector<BYTE>& salt, std::vector<BYTE
     errorCode.clear();
 
     try {
-        std::filesystem::path path = GetVaultFilePath();
-        std::ifstream file(path.wstring(), std::ios::binary);
-        if (!file.is_open()) {
+        fileData = ReadDataSection("vault");
+        if (fileData.is_null()) {
             errorCode = "vault_missing";
             return false;
         }
-        file >> fileData;
-        file.close();
     }
     catch (...) {
         errorCode = "vault_corrupted";
@@ -647,7 +632,6 @@ bool ReadVaultEnvelope(json& fileData, std::vector<BYTE>& salt, std::vector<BYTE
     return true;
 }
 
-// 用给定密钥校验 MAC 并解密信封
 bool DecryptEnvelopeWithKeys(const std::vector<BYTE>& aesKey, const std::vector<BYTE>& macKey,
                              const std::vector<BYTE>& salt, const std::vector<BYTE>& iv,
                              const std::vector<BYTE>& mac, const std::vector<BYTE>& cipher,
@@ -757,7 +741,8 @@ bool DecryptVaultWithStoredKeys(json& payload, std::string& errorCode) {
 bool VaultFileExists() {
     std::error_code ec;
     std::filesystem::path path = GetVaultFilePath();
-    return std::filesystem::exists(path, ec) && std::filesystem::file_size(path, ec) > 0;
+    if (std::filesystem::exists(path, ec) && std::filesystem::file_size(path, ec) > 0) return true;
+    return ReadDataSection("hello").is_object();   // 也接受已合并进 AccountManager.json 的 hello 节
 }
 
 // 把旧的 Steam 账号文件（accounts.json）转换为通用条目，便于首次创建保险库时导入
@@ -968,11 +953,125 @@ std::wstring GetHelloFilePath() {
     return (p.parent_path() / L"hello.json").wstring();
 }
 
+// ---------------------------------------------------------------------------
+// 单文件数据存储：所有状态集中在一个 AccountManager.json 里
+//   { "version": 1, "vault": {...}, "hello": {...}, "config": {...} }
+// 写入一律走"读整份 -> 只替换自己那一节 -> 原子写回"，避免互相覆盖。
+// ---------------------------------------------------------------------------
+
+}   // —— 以下为文件作用域的分区存储函数 ——
+std::wstring GetDataFilePath() {
+    wchar_t path[MAX_PATH] = {};
+    if (GetModuleFileNameW(NULL, path, MAX_PATH) == 0) return L"";
+    std::filesystem::path p(path);
+    return (p.parent_path() / L"AccountManager.json").wstring();
+}
+
+// 读取整份数据文件；不存在或解析失败时返回空对象
+json ReadDataRoot() {
+    // 首次运行：新文件不存在而旧三文件存在时，先合并（旧文件保留不删）
+    MigrateLegacyDataFiles();
+    const std::wstring file = GetDataFilePath();
+    if (file.empty()) return json::object();
+    std::ifstream in(std::filesystem::path(file), std::ios::binary);
+    if (!in) return json::object();
+    try {
+        std::stringstream ss;
+        ss << in.rdbuf();
+        json root = json::parse(ss.str());
+        return root.is_object() ? root : json::object();
+    } catch (...) {
+        return json::object();
+    }
+}
+
+// 原子写入整份数据文件（先写 .tmp 再替换）
+bool WriteDataRoot(const json& root) {
+    const std::wstring file = GetDataFilePath();
+    if (file.empty()) return false;
+    const std::filesystem::path target(file);
+    const std::filesystem::path tmp(target.wstring() + L".tmp");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out) return false;
+        out << root.dump(2);
+        out.flush();
+        if (!out) return false;
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, target, ec);
+    if (ec) {
+        std::filesystem::remove(target, ec);
+        ec.clear();
+        std::filesystem::rename(tmp, target, ec);
+    }
+    return !ec;
+}
+
+// 读某一节；不存在返回 null
+json ReadDataSection(const std::string& name) {
+    json root = ReadDataRoot();
+    if (root.is_object() && root.contains(name)) return root[name];
+    return json();
+}
+
+// 读-改-写：只更新指定那一节，其它节原样保留
+bool WriteDataSection(const std::string& name, const json& value) {
+    json root = ReadDataRoot();
+    if (!root.is_object()) root = json::object();
+    root["version"] = 1;
+    root[name] = value;
+    return WriteDataRoot(root);
+}
+
+// 读-改-写：删除某一节（其它节原样保留）
+bool RemoveDataSection(const std::string& name) {
+    json root = ReadDataRoot();
+    if (!root.is_object() || !root.contains(name)) return true;
+    root.erase(name);
+    return WriteDataRoot(root);
+}
+
+// 首次启动迁移：把旧的三个独立文件合并进 AccountManager.json（旧文件保留不删）
+void MigrateLegacyDataFiles() {
+    const std::wstring dataFile = GetDataFilePath();
+    if (dataFile.empty()) return;
+    if (std::filesystem::exists(std::filesystem::path(dataFile))) return;   // 已有新文件
+
+    json root = json::object();
+    root["version"] = 1;
+    bool any = false;
+    const std::pair<const char*, std::wstring> items[] = {
+        { "vault",  GetVaultFilePath() },
+        { "hello",  GetHelloFilePath() },
+        { "config", GetConfigFilePath() },
+    };
+    for (const auto& item : items) {
+        if (item.second.empty()) continue;
+        const std::filesystem::path legacy(item.second);
+        if (!std::filesystem::exists(legacy)) continue;
+        std::ifstream in(legacy, std::ios::binary);
+        if (!in) continue;
+        try {
+            std::stringstream ss;
+            ss << in.rdbuf();
+            root[item.first] = json::parse(ss.str());
+            any = true;
+        } catch (...) {
+            // 旧文件损坏：跳过这一节，不阻断启动
+        }
+    }
+    if (any) WriteDataRoot(root);
+}
+namespace {   // —— 恢复匿名命名空间 ——
+
+
 // 删除 Hello 解锁数据（凭据失效或数据损坏时清理，避免留下无法使用的解锁入口）
 void RemoveHelloFile() {
     try {
         std::error_code ec;
         std::filesystem::remove(GetHelloFilePath(), ec);
+        RemoveDataSection("hello");   // 同步清掉 AccountManager.json 里的 hello 节
     }
     catch (...) {
         // 忽略
@@ -1003,6 +1102,14 @@ bool ReadHelloFile(json& out, std::string& errorCode) {
 
     try {
         std::filesystem::path path = GetHelloFilePath();
+        // 优先使用 AccountManager.json 的 hello 节（合并后的主存储）；不存在时才回退旧文件
+        {
+            json helloSection = ReadDataSection("hello");
+            if (helloSection.is_object()) {
+                std::ofstream seed(path.wstring(), std::ios::binary | std::ios::trunc);
+                if (seed) { seed << helloSection.dump(); }
+            }
+        }
         std::ifstream file(path.wstring(), std::ios::binary);
         if (!file.is_open()) {
             errorCode = "hello_not_enabled";
@@ -1257,6 +1364,7 @@ json HelloEnableWorker(std::vector<BYTE> aesKey, std::vector<BYTE> macKey,
         std::string content = fileData.dump(4);
         file.write(content.c_str(), (std::streamsize)content.length());
         file.close();
+        WriteDataSection("hello", fileData);   // 同步到 AccountManager.json
     }
     catch (...) {
         return json{ {"type", "vaultError"}, {"code", "save_failed"} };
@@ -1303,6 +1411,7 @@ json HelloRewrapWorker(std::vector<BYTE> aesKey, std::vector<BYTE> macKey,
     try {
         std::error_code ec;
         std::filesystem::remove(GetHelloFilePath(), ec);
+        const bool helloCleared = RemoveDataSection(std::string("hello"));   // 同步清掉合并文件里的 hello 节
     }
     catch (...) {
         // 忽略
