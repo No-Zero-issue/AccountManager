@@ -207,7 +207,8 @@ class MainActivity : Activity() {
             val options = listOf<Pair<String, () -> Unit>>(
                 "✍️   手动添加" to { showAddSheet() },
                 "📷   扫描二维码" to { startScan() },
-                "🖼️   图片导入" to { pickQrImage() }
+                "🖼️   图片导入" to { pickQrImage() },
+                "ℹ️   关于" to { showAboutSheet() }
             )
             for ((label, action) in options) {
                 sheet.addView(sheetRow(label) {
@@ -219,6 +220,31 @@ class MainActivity : Activity() {
     }
 
     /** 手动添加弹层 */
+    /** 关于 */
+    private fun showAboutSheet() {
+        val version = try {
+            packageManager.getPackageInfo(packageName, 0).versionName
+        } catch (e: Exception) {
+            "未知"
+        }
+        showSheet("关于") { sheet ->
+            sheet.addView(text("Steam 令牌生成器", 18f, colorText, bold = true).apply { setPadding(dp(4), 0, 0, dp(4)) }, fullWidthMargin(0))
+            sheet.addView(text("版本 " + version + " · GPL-3.0-only", 13f, colorDim).apply { setPadding(dp(4), 0, 0, dp(12)) }, fullWidthMargin(0))
+            val body = "本地保存 Steam 令牌密钥并生成 5 位动态码。\n" +
+                "密钥用 Android Keystore 加密存放于本机，应用不联网、不上传任何数据。\n" +
+                "由 zxing / zxing-android-embedded（Apache-2.0）提供二维码能力。\n" +
+                "项目地址：github.com/No-Zero-issue/AccountManager"
+            sheet.addView(text(body, 13f, colorDim).apply { setPadding(dp(4), 0, dp(4), dp(14)) }, fullWidthMargin(0))
+            val copy = button("复制项目地址", colorAccent, colorOnAccent)
+            copy.setOnClickListener {
+                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+                    .setPrimaryClip(ClipData.newPlainText("url", "https://github.com/No-Zero-issue/AccountManager"))
+                toast("已复制")
+            }
+            sheet.addView(copy, fullWidthMargin(0))
+        }
+    }
+
     private fun showAddSheet() {
         showSheet("手动添加账号") { sheet ->
             val nameInput = sheetInput("名称（可留空）")

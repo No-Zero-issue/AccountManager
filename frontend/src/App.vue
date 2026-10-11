@@ -2722,6 +2722,7 @@ onUnmounted(() => {
             <div class="about-logo">🔐</div>
             <div class="about-name">Account Manager</div>
             <div class="about-version">版本 1.1.0 · GPL-3.0</div>
+            <div class="about-version" style="cursor: pointer;" @click="copyText('https://github.com/No-Zero-issue/AccountManager', '项目地址已复制')">github.com/No-Zero-issue/AccountManager</div>
             <div class="about-divider"></div>
             <div class="about-author">开发者: noob-xiaoyu</div>
             <div class="about-desc">本地加密的网站 / 软件密码管理器<br/>PBKDF2-HMAC-SHA256 + AES-256-CBC + HMAC</div>
