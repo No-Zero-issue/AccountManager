@@ -2158,6 +2158,7 @@ onUnmounted(() => {
             <table class="data-grid">
               <thead>
                 <tr>
+                  <th style="width: 30px"></th>
                   <th style="width: 150px">名称</th>
                   <th style="width: 130px">账号</th>
                   <th style="width: 130px">密码</th>
@@ -2169,9 +2170,12 @@ onUnmounted(() => {
               </thead>
               <tbody>
                 <tr v-for="entry in filteredEntries" :key="entry.id"
-                    :class="{ 'is-selected': selectedIds.has(entry.id), 'row-dragging': draggingId === entry.id, 'row-drag-over': dragOverId === entry.id }" draggable="true" @dragstart="onRowDragStart(entry, $event)" @dragover.prevent="onRowDragOver(entry)" @drop.prevent="onRowDrop(entry)" @dragend="onRowDragEnd"
+                    :class="{ 'is-selected': selectedIds.has(entry.id), 'row-dragging': draggingId === entry.id, 'row-drag-over': dragOverId === entry.id }" @dragover.prevent="onRowDragOver(entry)" @drop.prevent="onRowDrop(entry)" @dragend="onRowDragEnd"
                     @click="selectEntry(entry.id, $event)"
                     @contextmenu="openContextMenu($event, entry)">
+                    <td class="drag-cell">
+                      <span class="drag-handle" draggable="true" @dragstart="onRowDragStart(entry, $event)" @dragend="onRowDragEnd" title="拖动排序">⠿</span>
+                    </td>
                   <td>
                     <span class="type-icon">{{ entryType(entry) === 'software' ? '💻' : (entryType(entry) === 'recovery' ? '📄' : (entryType(entry) === 'steam' ? '🎮' : '🌐')) }}</span>
                     <span class="entry-name">{{ entry.name || '(未命名)' }}</span>
@@ -2224,7 +2228,7 @@ onUnmounted(() => {
                   </td>
                 </tr>
                 <tr v-if="filteredEntries.length === 0">
-                  <td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                  <td colspan="8" style="text-align: center; padding: 40px; color: var(--text-muted);">
                     {{ searchQuery ? '没有匹配的记录' : '这里还没有记录，点击右上角「➕ 新增」' }}
                   </td>
                 </tr>
@@ -3636,6 +3640,18 @@ onUnmounted(() => {
   width: 280px;
   height: 280px;
 }
+
+.drag-cell { width: 30px; padding: 0 4px; }
+
+.drag-handle {
+  display: inline-block;
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 15px;
+  user-select: none;
+}
+
+.drag-handle:active { cursor: grabbing; }
 
 /* 拖动排序反馈 */
 .data-grid tbody tr.row-dragging {
