@@ -5,9 +5,17 @@ Account Manager 是一款**本地优先的网站 / 软件密码管理器**。核
 
 ## 预览图
 <p align="center">
-  <img src="Image/phone.png" alt="Phone" width="180">
-  &nbsp;&nbsp;
-  <img src="Image/pc.png" alt="PC" width="450">
+  <img src="Image/phone.png" alt="手机端" width="220">
+  &nbsp;&nbsp;&nbsp;
+  <img src="Image/pc.png" alt="桌面端" width="520">
+</p>
+
+拖动排序的实时预览（跟手浮层 + 原行半透明残影 + 目标位置虚线空槽 + 其它行实时让位）：
+
+<p align="center">
+  <img src="Image/pc-drag.png" alt="桌面端拖动排序" width="520">
+  &nbsp;&nbsp;&nbsp;
+  <img src="Image/phone-drag.png" alt="手机端拖动排序" width="220">
 </p>
 
 ## 功能
@@ -16,7 +24,7 @@ Account Manager 是一款**本地优先的网站 / 软件密码管理器**。核
 - **Steam 账号专栏**：侧边栏独立入口，一键打开个人主页、**一键登录**
 - **Steam Guard 动态码**：Steam 专用的 5 位验证码（不是标准 TOTP），支持导入 SDA 的 `.maFile`、Base64 `shared_secret`、`otpauth://` 链接或二维码；一键登录时会直接显示当前验证码
 - 搜索（名称 / 账号 / 网址 / SteamID64 / 备注）、按类型与分类筛选、多选批量删除
-- **拖动排序**：表格最左侧手柄可上下拖动调整条目顺序，顺序随保险库一起加密保存 —— 拖动时整行跟着鼠标浮动、被拖行留半透明残影、目标位置用虚线空槽实时预览，其它行**实时让位**（鼠标跨过某行中线时空槽才换位，自带迟滞不会抖），松手才写盘
+- **拖动排序**：表格最左侧手柄可上下拖动调整条目顺序，顺序随保险库一起加密保存 —— 拖动时整行跟着鼠标浮动、被拖行留半透明残影、目标位置用虚线空槽实时预览，其它行**实时让位**（鼠标跨过某行中线时空槽才换位，自带迟滞不会抖），松手才写盘（见上方「预览图」里的拖动示例）
 - **分类管理**：在侧边栏直接新建 / 重命名（同步更新该分类下所有记录）/ 删除分类；分类列表与条目一起加密保存（可以存在暂时没有条目使用的空分类）
 - 密码显示 / 隐藏、一键复制（直接写入系统剪贴板）、随机密码生成器（可配置长度与字符集）
 - **TOTP 动态验证码**：填入 `otpauth://` 链接或 Base32 密钥，列表实时显示 6 / 8 位动态码（带剩余秒数，点一下即复制）；支持 SHA-1 / SHA-256 / SHA-512 与自定义位数、周期
@@ -27,15 +35,16 @@ Account Manager 是一款**本地优先的网站 / 软件密码管理器**。核
 - 深色 / 浅色主题、无边框自定义标题栏、窗口边缘缩放、快捷键（`Ctrl+F` 搜索、`Ctrl+N` 新增、`Ctrl+L` 锁定）
 
 ## 数据与加密
-- 数据文件：程序目录下的 `vault.json`，**整个保险库加密存储**
+- 数据文件：程序目录下的**单个 `AccountManager.json`**，分 `vault` / `hello` / `config` 三节，其中 `vault` 节整体加密
 - 密钥派生：PBKDF2-HMAC-SHA256，200000 次迭代，16 字节随机盐
 - 加密算法：AES-256-CBC（PKCS7 填充），每次保存使用新的随机 IV
 - 完整性校验：HMAC-SHA256（先加密后校验），主密码错误或文件被篡改都会被拒绝解密
 - 主密码不会被保存；派生密钥仅在解锁期间驻留内存，锁定或退出立即清零
 - 首次运行需设置主密码（至少 6 位），之后每次启动都需要输入主密码解锁
-- 界面设置（主题、侧边栏）保存在明文 `config.json`，其中不含任何敏感信息
-- TOTP 密钥与 2FA 恢复代码属于 `vault.json` 的一部分，同样被整体加密，不会以明文落盘
-- ⚠️ 忘记主密码将无法恢复数据，请自行备份 `vault.json` 并牢记主密码
+- 界面设置（主题、侧边栏）在 `config` 节里明文保存，其中不含任何敏感信息
+- TOTP 密钥、Steam `shared_secret`、2FA 恢复代码都属于 `vault` 节，同样被整体加密，不会以明文落盘
+- 写盘一律「读整份 → 只替换自己那一节 → 原子写回（先写 `.tmp` 再替换）」，避免各模块互相覆盖
+- ⚠️ 忘记主密码将无法恢复数据，请自行备份 `AccountManager.json` 并牢记主密码
 
 ## Steam 一键登录
 只有在你点击「🚀 登录」并在确认弹窗里确认后，才会执行以下系统操作（在此之前不会碰任何系统设置）：
@@ -47,7 +56,7 @@ Account Manager 是一款**本地优先的网站 / 软件密码管理器**。核
 ⚠️ 已知取舍：Steam 客户端只支持用命令行参数传入凭据，因此**密码在登录瞬间会出现在该进程的命令行里**，同机其他进程可能读到；同时账号名会落到注册表。如果不接受，就不要使用一键登录，改为手动在 Steam 里登录。
 
 ## Steam Guard 动态码
-Steam 的两步验证**不是标准 TOTP**：它用 Base64 的 `shared_secret`（不是 Base32），把动态截断的结果按自定义 26 字母表 `23456789BCDFGHJKMNPQRTVWXY` 编成 **5 位**码。标准验证器 App 从上图那个链接算出的是 6 位数字，**Steam 不认**，必须用 Steam 的自定义编码。
+Steam 的两步验证**不是标准 TOTP**：它用 Base64 的 `shared_secret`（不是 Base32），把动态截断的结果按自定义 26 字母表 `23456789BCDFGHJKMNPQRTVWXY` 编成 **5 位**码。标准验证器 App 从上表那个链接算出的是 6 位数字，**Steam 不认**，必须用 Steam 的自定义编码。
 
 本项目的实现与 SteamKit 的 `GenerateSteamGuardCode` / go-steam-totp 一致，并**与 node-steam-totp 做了 200 组随机密钥 + 随机时间的差分比对，结果完全一致**。
 
@@ -71,13 +80,13 @@ Steam 的两步验证**不是标准 TOTP**：它用 Base64 的 `shared_secret`�
 实现方式（不是简单地跳过密码）：
 1. 通过 `KeyCredentialManager` 创建一对 **TPM 保护的 Hello 密钥**，私钥只有在 PIN / 指纹 / 人脸验证通过后才能使用；
 2. 对固定挑战签名，签名经 **HKDF-SHA256** 派生出包装密钥；
-3. 用包装密钥加密真正的保险库密钥（AES 密钥 + HMAC 密钥 + 盐 + 迭代次数），结果保存在程序目录的 `hello.json`。
+3. 用包装密钥加密真正的保险库密钥（AES 密钥 + HMAC 密钥 + 盐 + 迭代次数），结果写进程序目录 `AccountManager.json` 的 `hello` 节（同时留一份 `hello.json` 作为兼容缓存）。
 
-因此：没有通过 Windows 安全中心验证就拿不到保险库密钥；`hello.json` 与本机、本用户、Hello 凭据绑定。修改主密码后会重新绑定一次 Hello 数据（会再弹一次验证）；如果重新绑定被取消，Hello 解锁会自动关闭，此时仍可用主密码解锁。
+因此：没有通过 Windows 安全中心验证就拿不到保险库密钥；`hello` 数据与本机、本用户、Hello 凭据绑定。修改主密码后会重新绑定一次 Hello 数据（会再弹一次验证）；如果重新绑定被取消，Hello 解锁会自动关闭，此时仍可用主密码解锁。
 
 注意事项：
 - 需要设备支持 Windows Hello 且已配置 PIN / 指纹 / 人脸，否则启用时会提示不可用；
-- 如果需要更高的安全强度，可在「设置 → 关闭 Windows Hello 解锁」删除 `hello.json` 与对应凭据，改为每次输入主密码。
+- 如果需要更高的安全强度，可在「设置 → 关闭 Windows Hello 解锁」删除 `hello` 数据与对应凭据，改为每次输入主密码。
 
 ## 代码结构
 
@@ -108,6 +117,28 @@ AccountManager/
 - 加密基于 Windows CNG（`bcrypt.lib`：`BCryptDeriveKeyPBKDF2` / `BCryptEncrypt` / `BCryptGenRandom`），无第三方加密库依赖
 - Windows Hello 使用 C++/WinRT（`Windows.Security.Credentials`，链接 `windowsapp.lib`）
 - 二维码解码使用 [jsQR](https://github.com/cozmo/jsQR)（Apache-2.0，纯 JS，随前端一起打进 EXE）
+
+命令行构建（Release）：
+
+```powershell
+npm.cmd --prefix frontend run build                      # 前端产出 frontend/dist/index.html
+(Get-Item AccountManager\AccountManager.rc).LastWriteTime = Get-Date   # 见下方提示
+msbuild AccountManager.sln /p:Configuration=Release /p:Platform=x64
+#   → x64\Release\AccountManager.exe
+```
+
+- ⚠️ **改过 `frontend/src` 之后必须触碰 `AccountManager.rc`**（或清理中间目录）再编译：MSBuild 的增量构建不会因为 `..\frontend\dist\index.html` 变化而重编资源，否则新界面进不了 EXE。
+- 若 MSBuild 报 `MSB6001 ... CL.exe 的命令行开关无效 / 字典中的关键字"no_proxy"`，是当前 shell 里同时存在 `no_proxy` 与 `NO_PROXY` 这类大小写重名变量，先在同一个 shell 里清掉再编译：
+  ```powershell
+  foreach ($n in 'http_proxy','HTTP_PROXY','https_proxy','HTTPS_PROXY','all_proxy','ALL_PROXY','no_proxy','NO_PROXY') {
+    [System.Environment]::SetEnvironmentVariable($n, $null)
+  }
+  ```
+- 若报**一堆「无法解析的外部符号」但没有任何编译错误**，先确认工程文件里 `Function\*.cpp` 的 10 个条目还在（被 Visual Studio 用旧的内存副本覆盖过就会丢）：
+  ```powershell
+  Select-String -Path AccountManager\AccountManager.vcxproj -Pattern '<ClCompile Include='   # 正常 11 行
+  git checkout -- AccountManager/AccountManager.vcxproj                                       # 丢了就恢复
+  ```
 
 ## 使用提示：怎么拿到 otpauth:// 链接
 - 网站正在给你**做 2FA 设置**时：二维码本身就是 `otpauth://` 链接，可直接截图后用「📷 二维码图片」导入；若页面同时给了「无法扫描？手动输入密钥」，直接粘贴那串密钥更省事。
@@ -151,6 +182,7 @@ AccountManager/
 - **拖动排序**：卡片数字右侧有自绘拖动手柄，按住即可拖动改顺序 —— 拖动时被拖卡片**跟手浮动**、原位置塌成空槽、目标位置实时预览，其它卡片**实时让位**，松手立即写入加密存储；右上角菜单「编辑卡片」里同样用这套拖动交互
 - 右上角三条杆菜单：编辑卡片 / 关于；右下角圆形＋：手动添加 / 扫描二维码 / 图片导入
 - 密钥用 **Android Keystore + AES-256-GCM** 加密存本机（`filesDir/entries.bin`），「关于」页显示版本与项目地址
+- 启动器图标为手绘「手机 + 2FA + 锁」线稿：使用 Android 8+ **自适应图标**（黑底 + 白线稿前景，图案已留出安全边距，圆形 / 方形遮罩都不会切到），并附带传统方形 / 圆形多密度图标兜底
 - 算法与桌面端一致（HMAC-SHA1 + 26 字母表取 5 位），17 个单测含与桌面端相同的固定向量
 
 ```
@@ -163,12 +195,10 @@ gradlew -p android testDebugUnitTest assembleRelease
 #   → android/app/build/outputs/apk/release/app-release.apk
 ```
 
-> 调试版与发布版签名不同，不能互相覆盖安装；签名密钥库不在版本控制中，请自行备份。
+> 调试版与发布版**签名不同，无法互相覆盖安装**；换签名安装需先卸载，而这会**清空 App 内数据**。
+> 签名密钥库不在版本控制中（`.gitignore` 有意排除），请自行备份 `android/keystore/release.jks` 与其中的密码。
 
 单元测试 17 个用例：与桌面端一致的固定向量、字母表 / 时间窗 / 周期、标准 TOTP 的 RFC 6238 向量、`.maFile`/Base64/otpauth 解析、非法输入拒绝、二维码「编码→解码」往返。
-
-> 注意：调试版与发布版**签名不同，无法互相覆盖安装**；换签名安装需先卸载（会清空 App 内数据）。
-> 签名密钥库不在版本控制中（`.gitignore` 有意排除），请自行备份 `android/keystore/release.jks` 与密码。
 
 ## 版本与发布
 
@@ -176,13 +206,15 @@ gradlew -p android testDebugUnitTest assembleRelease
 
 桌面端所有状态集中在 EXE 同目录的**单个 `AccountManager.json`**（分区：`vault` / `hello` / `config`）。首次运行若检测到旧的 `vault.json` / `hello.json` / `config.json`，会自动合并进去；**旧文件保留不删**，可随时回滚。
 
-产物：`x64/Release/AccountManager.exe`（桌面端）、`android/app/build/outputs/apk/release/2FA.apk`（手机端）
+产物：
+- 桌面端 `x64/Release/AccountManager.exe` —— 图标是手绘「密码保险箱」线稿，含 16 / 24 / 32 / 48 / 64 / 128 / 256 七档，且**全部使用 32bpp BMP 条目**（`LoadIcon` 对 PNG 压缩条目的支持不可靠）
+- 手机端 `android/app/build/outputs/apk/release/2FA.apk` —— 图标是手绘「手机 + 2FA + 锁」线稿的自适应图标
 
-> 改过 `frontend/src` 后需 `npm.cmd run build` 并触碰 `AccountManager/AccountManager.rc` 再编译 —— MSBuild 增量构建不会自动重编内嵌页面的资源。
+构建提示：改过 `frontend/src` 后必须 `npm.cmd run build` **并触碰 `AccountManager/AccountManager.rc`** 再编译，否则新界面进不了 EXE；详见「构建」一节的排错条目。
 
 ## 许可
 本项目以 **GNU 通用公共许可证第 3 版（GPL-3.0）** 发布，Copyright (C) 2026 Account Manager 开发者。
 
 - 你可以自由使用、修改、再分发本项目，但**再分发（包括分发编译好的 EXE）时必须提供完整源代码**，且衍生作品必须以同样的许可（GPL-3.0）发布。
 - 本程序不提供任何担保。完整条款见 [LICENSE.md](LICENSE.md)（含官方全文）。
-- 项目内第三方组件（nlohmann/json、Vue、jsQR、WIL、WebView2 SDK）遵循各自许可，均与 GPL-3.0 兼容，清单与说明见 [LICENSE.md](LICENSE.md)。
+- 项目内第三方组件（桌面端：nlohmann/json、Vue、jsQR、WIL、WebView2 SDK；手机端：ZXing core / zxing-android-embedded、AndroidX、JUnit）遵循各自许可，均与 GPL-3.0 兼容，清单与说明见 [LICENSE.md](LICENSE.md)。
