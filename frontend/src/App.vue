@@ -2689,7 +2689,7 @@ onUnmounted(() => {
     <footer class="status-bar">
       <span>{{ statusText }}</span>
       <span class="right">
-        {{ vaultState === 'unlocked' ? entries.length + ' 条记录 · 🔓 已解锁' : '🔒 已锁定' }} · v1.1.0
+        {{ vaultState === 'unlocked' ? entries.length + ' 条记录 · 🔓 已解锁' : '🔒 已锁定' }} · v1.0
       </span>
     </footer>
 
@@ -2721,7 +2721,7 @@ onUnmounted(() => {
           <div class="about-content">
             <div class="about-logo">🔐</div>
             <div class="about-name">Account Manager</div>
-            <div class="about-version">版本 1.1.0 · GPL-3.0</div>
+            <div class="about-version">版本 1.0 · GPL-3.0</div>
             <div class="about-version" style="cursor: pointer;" @click="copyText('https://github.com/No-Zero-issue/AccountManager', '项目地址已复制')">github.com/No-Zero-issue/AccountManager</div>
             <div class="about-divider"></div>
             <div class="about-author">开发者: noob-xiaoyu</div>
