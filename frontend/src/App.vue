@@ -201,6 +201,42 @@ const vaultSnapshot = () => JSON.stringify({
   categories: categories.value
 });
 
+// ---- 拖动排序（桌面端表格行）----
+// 顺序即 entries 数组顺序，拖完直接持久化进保险库
+const draggingId = ref(null);
+const dragOverId = ref(null);
+
+const onRowDragStart = (entry, event) => {
+  draggingId.value = entry.id;
+  if (event && event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(entry.id));
+  }
+};
+
+const onRowDragOver = (entry) => {
+  if (draggingId.value === null || entry.id === draggingId.value) return;
+  dragOverId.value = entry.id;
+};
+
+const onRowDragEnd = () => {
+  draggingId.value = null;
+  dragOverId.value = null;
+};
+
+const onRowDrop = (target) => {
+  const list = entries.value;
+  const from = list.findIndex((x) => x.id === draggingId.value);
+  const to = list.findIndex((x) => x.id === target.id);
+  if (from < 0 || to < 0 || from === to) { onRowDragEnd(); return; }
+  const next = list.slice();
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  entries.value = next;
+  onRowDragEnd();
+  saveEntries();
+};
+
 const saveEntries = () => {
   if (vaultState.value !== 'unlocked') return;
   const data = JSON.parse(JSON.stringify(entries.value));
@@ -2133,7 +2169,7 @@ onUnmounted(() => {
               </thead>
               <tbody>
                 <tr v-for="entry in filteredEntries" :key="entry.id"
-                    :class="{ 'is-selected': selectedIds.has(entry.id) }"
+                    :class="{ 'is-selected': selectedIds.has(entry.id), 'row-dragging': draggingId === entry.id, 'row-drag-over': dragOverId === entry.id }" draggable="true" @dragstart="onRowDragStart(entry, $event)" @dragover.prevent="onRowDragOver(entry)" @drop.prevent="onRowDrop(entry)" @dragend="onRowDragEnd"
                     @click="selectEntry(entry.id, $event)"
                     @contextmenu="openContextMenu($event, entry)">
                   <td>
@@ -3599,6 +3635,15 @@ onUnmounted(() => {
 .qr-image-box img {
   width: 280px;
   height: 280px;
+}
+
+/* 拖动排序反馈 */
+.data-grid tbody tr.row-dragging {
+  opacity: 0.45;
+}
+
+.data-grid tbody tr.row-drag-over {
+  box-shadow: inset 0 2px 0 var(--accent-primary);
 }
 
 /* 浅色主题 */
