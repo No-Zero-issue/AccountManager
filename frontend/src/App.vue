@@ -203,82 +203,117 @@ const vaultSnapshot = () => JSON.stringify({
 
 // ---- 拖动排序（桌面端表格行）----
 // 顺序即 entries 数组顺序，拖完直接持久化进保险库
-// 拖动中的反馈：被拖的行留一个半透明残影，目标位置用一个虚线空槽实时预览，
-// 空槽上下的行被实时挤开；鼠标位置跨过某行中线时空槽才换位（自带迟滞，不抖）
-const draggingId = ref(null);      // 正在拖动的行（逻辑用，立刻置位）
-const dragGhostId = ref(null);     // 残影样式（晚一帧置位，避免残影被截进拖动预览图）
+// 不用 HTML5 拖放（WebView2 里原生拖动不可靠：dragstart 之后拖动不推进、dragend 也不来），
+// 改成自己用鼠标事件实现：按住手柄克隆整行做跟手浮层，原行留半透明残影，
+// 目标位置用虚线空槽实时预览、其它行实时让位；松开鼠标才写盘
+const draggingId = ref(null);      // 正在拖动的行（残影样式 + 逻辑判断）
 const dragGapPos = ref(-1);        // 空槽位置：filteredEntries 的下标，-1 表示不显示
 
-const onRowDragStart = (entry, event) => {
-  draggingId.value = entry.id;
-  const from = filteredEntries.value.findIndex((x) => x.id === entry.id);
-  dragGapPos.value = from < 0 ? -1 : from;
-  if (event && event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', String(entry.id));
-    // 浏览器默认只拿手柄那一小块当预览，这里换成整行跟着鼠标走
-    const row = event.currentTarget ? event.currentTarget.closest('tr') : null;
-    if (row) {
-      try {
-        const rect = row.getBoundingClientRect();
-        event.dataTransfer.setDragImage(row, event.clientX - rect.left, event.clientY - rect.top);
-      } catch (e) {
-        // 拖动预览图设置失败不影响排序本身
-      }
-    }
-  }
-  // 预览图是在 dragstart 之后立刻截的，等一帧再上残影样式，免得预览图也是半透明
-  requestAnimationFrame(() => { dragGhostId.value = entry.id; });
-};
+let dragClone = null;              // 跟手浮层（外面包一层 table，克隆出来的 tr 才能正常渲染）
+let dragOffset = { x: 0, y: 0 };   // 鼠标相对被拖行左上角的偏移
+let dragFromIndex = -1;
+let dragMovedId = null;
+let dragListenersOn = false;
+let suppressRowClick = false;      // 拖动刚结束，别把这一次当成点击选中
 
-// 鼠标在当前行的上半 / 下半，决定空槽插在这一行之前还是之后
-const onRowDragOverIndex = (index, event) => {
-  if (draggingId.value === null) return;
-  const row = event.currentTarget;
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+const dataRowEls = () => Array.from(document.querySelectorAll('table.data-grid > tbody > tr'))
+  .filter((r) => !r.classList.contains('drag-gap-row'));
+
+const beginRowDrag = (entry, event) => {
+  if (event.button !== 0 || draggingId.value !== null) return;
+  const row = event.currentTarget ? event.currentTarget.closest('tr') : null;
   if (!row) return;
+  const index = dataRowEls().indexOf(row);
+  if (index < 0) return;
   const rect = row.getBoundingClientRect();
-  const before = event.clientY < rect.top + rect.height / 2;
-  dragGapPos.value = before ? index : index + 1;
+
+  // 先克隆（此时原行还没加残影样式），做跟手浮层
+  const wrap = document.createElement('div');
+  wrap.className = 'drag-clone';
+  wrap.style.width = rect.width + 'px';
+  wrap.style.transform = `translate(${rect.left}px, ${rect.top}px)`;
+  const table = document.createElement('table');
+  table.className = 'data-grid';
+  table.style.width = rect.width + 'px';
+  const tbody = document.createElement('tbody');
+  tbody.appendChild(row.cloneNode(true));
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  document.body.appendChild(wrap);
+
+  dragClone = wrap;
+  dragOffset = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  dragFromIndex = index;
+  dragMovedId = entry.id;
+  draggingId.value = entry.id;
+  dragGapPos.value = index;
+  document.body.classList.add('row-dragging-active');
+  window.addEventListener('mousemove', onRowDragMove, true);
+  window.addEventListener('mouseup', onRowDragUp, true);
+  window.addEventListener('keydown', onRowDragKey, true);
+  dragListenersOn = true;
+  event.preventDefault();
 };
 
-// 鼠标落在空槽或表格空白处时，只是允许放置，不改空槽位置
-const onTableDragOver = (event) => {
-  if (draggingId.value !== null && event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+const onRowDragMove = (event) => {
+  if (dragClone) {
+    dragClone.style.transform = `translate(${event.clientX - dragOffset.x}px, ${event.clientY - dragOffset.y}px)`;
+  }
+  // 看鼠标落在哪一行：上半 → 空槽插到这一行之前，下半 → 之后
+  const el = document.elementFromPoint(event.clientX, event.clientY);
+  const row = el && el.closest ? el.closest('table.data-grid > tbody > tr') : null;
+  if (!row || row.classList.contains('drag-gap-row')) return;   // 停在空槽上位置不变
+  const index = dataRowEls().indexOf(row);
+  if (index < 0) return;
+  const rect = row.getBoundingClientRect();
+  dragGapPos.value = event.clientY < rect.top + rect.height / 2 ? index : index + 1;
 };
 
-const onRowDragEnd = () => {
+const onRowDragUp = () => finishRowDrag(true);
+const onRowDragKey = (event) => { if (event.key === 'Escape') finishRowDrag(false); };
+
+const endRowDrag = () => {
+  if (dragClone) { dragClone.remove(); dragClone = null; }
+  if (dragListenersOn) {
+    window.removeEventListener('mousemove', onRowDragMove, true);
+    window.removeEventListener('mouseup', onRowDragUp, true);
+    window.removeEventListener('keydown', onRowDragKey, true);
+    dragListenersOn = false;
+  }
+  document.body.classList.remove('row-dragging-active');
   draggingId.value = null;
-  dragGhostId.value = null;
   dragGapPos.value = -1;
+  dragFromIndex = -1;
+  dragMovedId = null;
+  suppressRowClick = true;
+  setTimeout(() => { suppressRowClick = false; }, 0);
 };
 
-const onRowDrop = () => {
-  const movedId = draggingId.value;
-  const list = entries.value;
-  const from = list.findIndex((x) => x.id === movedId);
-  if (from < 0) { onRowDragEnd(); return; }
-
-  // 按当前空槽位置算出落点（用可见列表算，兼容搜索 / 分类筛选）
+const finishRowDrag = (commit) => {
+  const movedId = dragMovedId;
+  const gapPos = dragGapPos.value;
+  // 按空槽位置算落点：用可见列表换算，兼容搜索 / 分类筛选
   const visible = filteredEntries.value;
   const ghostPos = visible.findIndex((x) => x.id === movedId);
   const rest = visible.filter((x) => x.id !== movedId);   // 去掉被拖项之后的可见顺序
-  const gapPos = dragGapPos.value < 0 ? ghostPos : dragGapPos.value;
   let insert = gapPos > ghostPos ? gapPos - 1 : gapPos;
   insert = Math.max(0, Math.min(insert, rest.length));
 
+  endRowDrag();
+  if (!commit || ghostPos < 0 || gapPos < 0) return;
+
+  const list = entries.value;
+  const from = list.findIndex((x) => x.id === movedId);
+  if (from < 0) return;
   const moved = list[from];
   const next = list.filter((x) => x.id !== movedId);
   if (insert >= rest.length) {
-    next.push(moved);                                     // 落到最后
+    next.push(moved);                                            // 落到最后
   } else {
     const at = next.findIndex((x) => x.id === rest[insert].id);   // 插在这一项之前
     next.splice(at < 0 ? next.length : at, 0, moved);
   }
-
-  const changed = next.some((x, i) => x.id !== list[i].id);
-  onRowDragEnd();
-  if (!changed) return;
+  if (!next.some((x, i) => x.id !== list[i].id)) return;          // 顺序没变就不写盘
   entries.value = next;
   saveEntries();
 };
@@ -1662,6 +1697,7 @@ const confirmDeleteCategory = () => {
 
 // ============================================================ 选择与键盘
 const selectEntry = (id, event) => {
+  if (suppressRowClick) return;   // 刚拖动完，这一次不当点击
   const isCtrl = event && event.ctrlKey;
   const isShift = event && event.shiftKey;
 
@@ -2214,15 +2250,15 @@ onUnmounted(() => {
                   <th style="width: 120px">备注</th>
                 </tr>
               </thead>
-              <tbody @dragover.prevent="onTableDragOver" @drop.prevent="onRowDrop" @dragend="onRowDragEnd">
+              <tbody>
                 <template v-for="(entry, index) in filteredEntries" :key="entry.id">
                 <tr v-if="dragGapPos === index" class="drag-gap-row"><td colspan="8"><div class="drag-gap-box"></div></td></tr>
                 <tr
-                    :class="{ 'is-selected': selectedIds.has(entry.id), 'row-dragging': dragGhostId === entry.id }" @dragover.prevent="onRowDragOverIndex(index, $event)"
+                    :class="{ 'is-selected': selectedIds.has(entry.id), 'row-dragging': draggingId === entry.id }"
                     @click="selectEntry(entry.id, $event)"
                     @contextmenu="openContextMenu($event, entry)">
                     <td class="drag-cell">
-                      <span class="drag-handle" draggable="true" @dragstart="onRowDragStart(entry, $event)" @dragend="onRowDragEnd" title="拖动排序">⠿</span>
+                      <span class="drag-handle" @mousedown.prevent="beginRowDrag(entry, $event)" title="按住拖动排序">⠿</span>
                     </td>
                   <td>
                     <span class="type-icon">{{ entryType(entry) === 'software' ? '💻' : (entryType(entry) === 'recovery' ? '📄' : (entryType(entry) === 'steam' ? '🎮' : '🌐')) }}</span>
@@ -3703,7 +3739,8 @@ onUnmounted(() => {
 
 .drag-handle:active { cursor: grabbing; }
 
-/* 拖动排序反馈：被拖的行留半透明残影，目标位置用虚线空槽实时预览（其它行被挤开） */
+/* 拖动排序反馈（鼠标事件实现，不依赖 HTML5 拖放）：
+   被拖的行留半透明残影，克隆出的整行跟着鼠标浮动，目标位置用虚线空槽实时预览 */
 .data-grid tbody tr.row-dragging {
   opacity: 0.3;
 }
@@ -3725,6 +3762,33 @@ onUnmounted(() => {
   border: 1px dashed var(--accent-primary);
   border-radius: 8px;
   background: rgba(78, 161, 255, 0.08);
+}
+
+/* 跟手浮层：克隆的整行 */
+.drag-clone {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.96;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+}
+
+.drag-clone table.data-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+body.row-dragging-active {
+  user-select: none;
+  cursor: grabbing;
+}
+
+body.row-dragging-active * {
+  cursor: grabbing !important;
 }
 
 /* 浅色主题 */
