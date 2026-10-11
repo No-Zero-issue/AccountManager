@@ -3764,33 +3764,9 @@ onUnmounted(() => {
   background: rgba(78, 161, 255, 0.08);
 }
 
-/* 跟手浮层：克隆的整行 */
-.drag-clone {
-  position: fixed;
-  left: 0;
-  top: 0;
-  z-index: 9999;
-  pointer-events: none;
-  opacity: 0.96;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
-}
-
-.drag-clone table.data-grid {
-  border-collapse: separate;
-  border-spacing: 0;
-}
-
-body.row-dragging-active {
-  user-select: none;
-  cursor: grabbing;
-}
-
-body.row-dragging-active * {
-  cursor: grabbing !important;
-}
-
+/* 注意：跟手浮层（.drag-clone）与 body.row-dragging-active 的样式在文件末尾的
+   非 scoped 样式块里 —— 克隆节点是运行时 createElement 出来的，不带 scope 属性，
+   写在这里（scoped）选择器匹配不上，浮层会退化成文档流里的普通块、根本看不见。 */
 /* 浅色主题 */
 .light-theme {
   --bg-primary: #ffffff;
@@ -4626,4 +4602,34 @@ body.row-dragging-active * {
   outline: none;
 }
 </style>
+<style>
+/* 拖动排序反馈里「运行时创建」的那部分必须放在非 scoped 样式块：
+   .drag-clone 是 beginRowDrag() 里 createElement + appendChild 出来的，不带 scoped 的 data-v 属性，
+   而 body.row-dragging-active 作用在 <body> 上，同样不在组件的 scope 里。
+   放进 scoped 块会导致选择器不匹配 —— 浮层会失去 position:fixed，退化成文档流里的普通块（看不见）。 */
+.drag-clone {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.96;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+}
 
+.drag-clone table.data-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+body.row-dragging-active {
+  user-select: none;
+  cursor: grabbing;
+}
+
+body.row-dragging-active * {
+  cursor: grabbing !important;
+}
+</style>
