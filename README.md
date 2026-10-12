@@ -10,14 +10,6 @@ Account Manager 是一款**本地优先的网站 / 软件密码管理器**。核
   <img src="Image/pc.png" alt="桌面端" width="520">
 </p>
 
-拖动排序的实时预览（跟手浮层 + 原行半透明残影 + 目标位置虚线空槽 + 其它行实时让位）：
-
-<p align="center">
-  <img src="Image/pc-drag.png" alt="桌面端拖动排序" width="520">
-  &nbsp;&nbsp;&nbsp;
-  <img src="Image/phone-drag.png" alt="手机端拖动排序" width="220">
-</p>
-
 ## 功能
 - 条目类型：🌐 网站、💻 软件、🎮 Steam 账号、📄 恢复代码
 - 条目字段：名称、类型、网址或程序路径、账号、密码、SteamID64（Steam）、TOTP 密钥、2FA 恢复代码、分类、备注
