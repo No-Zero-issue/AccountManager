@@ -4,8 +4,14 @@
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import jsQR from 'jsqr';
 import QRCode from 'qrcode';
+import { buildSyncPages } from './syncPackage.js';
+import { buildOtpAuthUri as toOtpAuthUri } from './otpauth.js';
 
 // ============================================================ 保险库状态
+// 程序版本：由 vite.config.js 从 AccountManager/version.h 注入（唯一来源），
+// 直接用浏览器打开源码时为 undefined，这里兜底显示 dev
+const appVersion = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev';
+
 const vaultState = ref('loading');   // loading | setup | locked | unlocked
 const masterPassword = ref('');
 const unlockPasswordInput = ref(null);   // 锁屏：未启用 Hello 时自动聚焦到主密码框
@@ -1465,10 +1471,33 @@ const base64ToBase32 = (base64) => {
 };
 
 // 生成该账号的 otpauth 链接（手机端与第三方验证器都能读）
+//   密钥归一化在这里做：Steam 的 Base64 shared_secret 转成 Base32，
+//   标准 TOTP 用 parseTotpInput 取出 Base32 密钥与算法 / 位数 / 周期；
+//   链接本身的拼装放在 otpauth.js（纯函数，可单独验证）。
 const buildOtpAuthUri = (entry) => {
-  const secret = base64ToBase32(entry.totpSecret || '');
-  const label = encodeURIComponent(entry.username || entry.name || 'steam');
-  return `otpauth://totp/Steam:${label}?secret=${secret}&issuer=Steam`;
+  if (!entry || !hasTotp(entry)) return '';
+
+  if (entry.totpAlgorithm === 'steam') {
+    const steam = parseSteamGuardInput(entry.totpSecret);
+    if (!steam) return '';
+    return toOtpAuthUri({
+      type: 'steam',
+      label: entry.name || entry.username || 'Steam 账号',
+      secretBase32: base64ToBase32(steam.secret)
+    });
+  }
+
+  const config = parseTotpInput(entry.totpSecret);
+  if (!config) return '';
+  return toOtpAuthUri({
+    type: 'totp',
+    label: entry.name || '',
+    account: entry.username || '',
+    secretBase32: config.secret,
+    algorithm: config.algorithm.replace(/-/g, ''),
+    digits: config.digits,
+    period: config.period
+  });
 };
 
 const showQrTarget = ref(null);
@@ -1476,15 +1505,91 @@ const qrExportUrl = ref('');
 const qrExportError = ref('');
 const openQrCode = async (entry) => {
   if (!entry) return;
-  if (!entry.totpSecret) { statusText.value = '该条目还没有令牌密钥，无法生成二维码'; return; }
+  if (!hasTotp(entry)) { statusText.value = '该条目还没有 2FA 密钥，无法生成二维码'; return; }
+  const uri = buildOtpAuthUri(entry);
+  if (!uri) { statusText.value = '密钥格式不正确，无法生成二维码'; return; }
   showQrTarget.value = entry;
   qrExportError.value = '';
   qrExportUrl.value = '';
   try {
-    qrExportUrl.value = await QRCode.toDataURL(buildOtpAuthUri(entry), { width: 280, margin: 1 });
+    qrExportUrl.value = await QRCode.toDataURL(uri, { width: 280, margin: 1 });
   } catch (e) {
     qrExportError.value = '二维码生成失败：' + (e && e.message ? e.message : '未知错误');
   }
+};
+
+// ============================================================ 同步到手机（2FA 打包二维码）
+// 把所有带 2FA 密钥的条目打包成同步包，一条记录一行，条目多时自动分多页，
+// 一页一张二维码，手机端「从电脑同步」按顺序扫完再合并导入。
+// 格式定义在 syncPackage.js（与手机端 SyncPackage.kt 一一对应）。
+const showSyncModal = ref(false);
+const syncPages = ref([]);
+const syncIndex = ref(0);
+const syncQrUrl = ref('');
+const syncError = ref('');
+const syncSkipped = ref(0);
+
+// 把条目整理成同步包需要的字段（密钥统一成 Base32；Steam 的 Base64 在这里转换）
+const collectSyncRecords = () => {
+  const records = [];
+  let skipped = 0;
+  for (const entry of entries.value) {
+    if (!hasTotp(entry)) continue;
+    const name = (entry.name || entry.username || '未命名').replace(/[\t\r\n]+/g, ' ').trim() || '未命名';
+    const revocation = (entry.revocationCode || '').replace(/[\t\r\n]+/g, ' ').trim();
+
+    if (entry.totpAlgorithm === 'steam') {
+      const steam = parseSteamGuardInput(entry.totpSecret);
+      if (!steam) { skipped++; continue; }
+      records.push({
+        name, type: 'steam', secret: base64ToBase32(steam.secret),
+        algorithm: 'SHA1', digits: 5, period: STEAM_PERIOD, revocation
+      });
+      continue;
+    }
+
+    const config = parseTotpInput(entry.totpSecret);
+    if (!config) { skipped++; continue; }
+    records.push({
+      name, type: 'totp', secret: config.secret,
+      algorithm: config.algorithm.replace(/-/g, ''),
+      digits: config.digits, period: config.period, revocation: ''
+    });
+  }
+  return { records, skipped };
+};
+
+const renderSyncQr = async () => {
+  syncQrUrl.value = '';
+  syncError.value = '';
+  const text = syncPages.value[syncIndex.value] || '';
+  if (!text) return;
+  try {
+    // 纠错级别用 L（容量最大），尺寸给足，手机上才好扫
+    syncQrUrl.value = await QRCode.toDataURL(text, { errorCorrectionLevel: 'L', width: 440, margin: 1 });
+  } catch (e) {
+    syncError.value = '本页数据太大，二维码生成失败：' + (e && e.message ? e.message : '未知错误');
+  }
+};
+
+const openSyncModal = async () => {
+  const { records, skipped } = collectSyncRecords();
+  if (records.length === 0) {
+    statusText.value = '没有可同步的 2FA 条目（需要先填好 TOTP 密钥）';
+    return;
+  }
+  syncSkipped.value = skipped;
+  syncPages.value = buildSyncPages(records).pages;
+  syncIndex.value = 0;
+  showSyncModal.value = true;
+  await renderSyncQr();
+};
+
+const syncStep = async (delta) => {
+  const next = syncIndex.value + delta;
+  if (next < 0 || next >= syncPages.value.length) return;
+  syncIndex.value = next;
+  await renderSyncQr();
 };
 
 const openEnrollModal = (entry, mode) => {
@@ -1911,6 +2016,9 @@ const handleSettingsAction = (action) => {
       break;
     case 'lock':
       lockVault();
+      break;
+    case 'sync':
+      openSyncModal();
       break;
     case 'about':
       showAbout.value = true;
@@ -2721,7 +2829,13 @@ onUnmounted(() => {
         <div class="modal-dialog" style="width: 380px;">
           <h3 class="modal-title">📱 导出二维码</h3>
           <p class="cat-delete-text" style="text-align: left; margin-bottom: 8px;">
-            用手机上的 Steam 令牌 App 扫描这个二维码即可导入 <strong>{{ showQrTarget.name }}</strong> 的密钥：
+            用手机上的「2FA」App 扫描这个二维码，即可导入 <strong>{{ showQrTarget.name }}</strong> 的密钥。
+          </p>
+          <p class="field-hint" style="text-align: left; margin-bottom: 8px;">
+            <template v-if="showQrTarget.totpAlgorithm === 'steam'">这是 Steam Guard 令牌（5 位字母码），只有认 Steam 的验证器能读。</template>
+            <template v-else>标准 TOTP，用 Google Authenticator / Aegis 等任意验证器扫也可以。</template>
+            <br />
+            条目多的话，用「设置 → 📲 同步到手机（2FA）」一次全部导入。
           </p>
           <div class="qr-image-box">
             <img v-if="qrExportUrl" :src="qrExportUrl" alt="otpauth 二维码" />
@@ -2735,6 +2849,37 @@ onUnmounted(() => {
           <p class="field-hint">⚠️ 二维码等价于密钥本身，别截图外传；扫完即关。</p>
           <div class="edit-actions">
             <button class="btn success" @click="showQrTarget = null">完成</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- 弹窗：同步到手机（把所有 2FA 条目打包成二维码） -->
+    <Transition name="modal-fade">
+      <div v-if="showSyncModal" class="modal-overlay" @mousedown.self="overlayPressed = true" @mouseup.self="closeOverlay(() => { showSyncModal = false })">
+        <div class="modal-dialog sync-panel">
+          <h3 class="modal-title">📲 同步到手机</h3>
+          <p class="cat-delete-text" style="text-align: left; margin-bottom: 8px;">
+            手机端：右上角三条杆菜单 →「从电脑同步」→ 扫码导入。
+            <template v-if="syncPages.length > 1">共 {{ syncPages.length }} 张，请按顺序逐张扫（每扫完一张手机会自动接着弹扫码界面）。</template>
+            <template v-else>只有一张，扫一次即可。</template>
+          </p>
+          <div class="qr-image-box sync">
+            <img v-if="syncQrUrl" :src="syncQrUrl" alt="2FA 同步二维码" />
+            <div v-else-if="syncError" class="field-hint error">{{ syncError }}</div>
+            <div v-else class="field-hint">正在生成…</div>
+          </div>
+          <div class="sync-pager">
+            <button class="btn-sm" :disabled="syncIndex === 0" @click="syncStep(-1)">← 上一张</button>
+            <span class="field-hint">第 {{ syncIndex + 1 }} / {{ syncPages.length }} 张</span>
+            <button class="btn-sm" :disabled="syncIndex >= syncPages.length - 1" @click="syncStep(1)">下一张 →</button>
+          </div>
+          <p v-if="syncSkipped" class="field-hint">有 {{ syncSkipped }} 条密钥格式不正确，已跳过。</p>
+          <p class="field-hint">扫完手机会自动去重合并：已有的密钥跳过，新密钥追加，不会删除手机上的条目。</p>
+          <p class="field-hint">⚠️ 同步包等价于全部 2FA 密钥，别截图外传；同步完请关掉本窗口。</p>
+          <div class="edit-actions">
+            <button class="btn" @click="copyText(syncPages[syncIndex], '本页同步包已复制')">复制本页文本</button>
+            <button class="btn success" @click="showSyncModal = false">完成</button>
           </div>
         </div>
       </div>
@@ -2815,7 +2960,7 @@ onUnmounted(() => {
     <footer class="status-bar">
       <span>{{ statusText }}</span>
       <span class="right">
-        {{ vaultState === 'unlocked' ? entries.length + ' 条记录 · 🔓 已解锁' : '🔒 已锁定' }} · v1.0
+        {{ vaultState === 'unlocked' ? entries.length + ' 条记录 · 🔓 已解锁' : '🔒 已锁定' }} · v{{ appVersion }}
       </span>
     </footer>
 
@@ -2835,6 +2980,7 @@ onUnmounted(() => {
         </div>
         <div class="context-menu-item" @click="handleSettingsAction('lock')">🔒 立即锁定</div>
         <div class="context-menu-divider"></div>
+        <div class="context-menu-item" @click="handleSettingsAction('sync')">📲 同步到手机（2FA）</div>
         <div class="context-menu-item" @click="handleSettingsAction('about')">ℹ️ 关于</div>
       </div>
     </Transition>
@@ -2847,7 +2993,7 @@ onUnmounted(() => {
           <div class="about-content">
             <div class="about-logo">🔐</div>
             <div class="about-name">Account Manager</div>
-            <div class="about-version">版本 1.0 · GPL-3.0</div>
+            <div class="about-version">版本 {{ appVersion }} · GPL-3.0</div>
             <div class="about-divider"></div>
             <div class="about-author">开发者: No-Zero-issue</div>
             <div class="about-desc">本地加密的网站 / 软件密码管理器<br/>PBKDF2-HMAC-SHA256 + AES-256-CBC + HMAC</div>
@@ -3725,6 +3871,24 @@ onUnmounted(() => {
 .qr-image-box img {
   width: 280px;
   height: 280px;
+}
+
+/* 同步到手机：一页一张二维码，画大一点手机才好扫 */
+.sync-panel { width: 540px; }
+
+.qr-image-box.sync { min-height: 460px; }
+
+.qr-image-box.sync img {
+  width: 440px;
+  height: 440px;
+}
+
+.sync-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0 4px;
 }
 
 .drag-cell { width: 30px; padding: 0 4px; }

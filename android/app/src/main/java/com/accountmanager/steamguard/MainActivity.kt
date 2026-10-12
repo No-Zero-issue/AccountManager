@@ -80,6 +80,10 @@ class MainActivity : Activity() {
     private lateinit var listContainer: LinearLayout
     private var sheetDialog: Dialog? = null
 
+    // ---- 「从电脑同步」：收集到的分页（页码 -> 该页内容），凑齐后一次性合并 ----
+    private val syncPages = sortedMapOf<Int, SyncPackage.Page>()
+    private var syncTotal = 0
+
     // ---- 拖动排序状态（方案 B：跟手浮层 + 原位空槽 + 实时挤压） ----
     /** 正在被拖动的条目 */
     private var dragEntry: Entry? = null
@@ -296,10 +300,14 @@ class MainActivity : Activity() {
             }
             setPadding(0, dp(6), 0, dp(6))
         }
-        val items = listOf<Pair<String, () -> Unit>>(
+        val items = mutableListOf<Pair<String, () -> Unit>>(
             "编辑卡片" to { showEditSheet() },
-            "关于" to { showAboutSheet() }
+            "从电脑同步" to { startSync() }
         )
+        if (syncPages.isNotEmpty()) {
+            items.add("取消未完成的同步（${syncPages.size}/$syncTotal）" to { cancelSync() })
+        }
+        items.add("关于" to { showAboutSheet() })
         items.forEachIndexed { index, item ->
             val label = item.first
             val action = item.second
@@ -743,7 +751,13 @@ class MainActivity : Activity() {
     // ---------------- 数据 ----------------
 
     private fun loadEntries() {
-        val plain = store.load() ?: return
+        val loaded = store.load()
+        val plain = loaded.text ?: return
+
+        // 先整份解析成功，再替换列表。
+        // 以前是「边解析边 add」，一旦某条记录坏掉就会留下半截列表，
+        // 之后任何一次保存（改名 / 拖动 / 导入 / 删除）都会把半截写回去 —— 等于永久丢令牌。
+        val parsed = ArrayList<Entry>()
         try {
             val arr = JSONArray(plain)
             for (i in 0 until arr.length()) {
@@ -751,15 +765,21 @@ class MainActivity : Activity() {
                 val name = o.optString("name", "未命名")
                 val secret = o.getString("secret")
                 val revocation = o.optString("revocation").ifEmpty { null }
-                entries.add(Entry(name, secret, revocation,
+                parsed.add(Entry(name, secret, revocation,
                     o.optString("type", "steam"),
                     o.optInt("digits", 6),
                     o.optInt("period", 30),
                     o.optString("algorithm", "SHA1")))
             }
         } catch (e: Exception) {
-            toast("本地数据解析失败，已忽略")
+            // 解析失败就保持现状（不清空、不保存），文件原样留着，避免越弄越糟
+            toast("本地数据解析失败，已保持原样（未写入任何改动）")
+            return
         }
+
+        entries.clear()
+        entries.addAll(parsed)
+        if (loaded.fromBackup) toast("主数据损坏，已从备份恢复（可能少了最后一次改动）")
     }
 
     private fun persist() {
@@ -797,6 +817,81 @@ e.revocation?.let { put("revocation", it) }
         } catch (e: Exception) {
             toast("内容无法识别为密钥：" + (e.message ?: "未知错误"))
         }
+    }
+
+    // ---------------- 从电脑同步（2FA 打包二维码） ----------------
+
+    /** 菜单入口：开始 / 继续一次同步（已收到的分页保留，方便中断后再扫） */
+    private fun startSync() {
+        if (syncPages.isEmpty()) {
+            toast("对准电脑端「同步到手机」里的二维码")
+        } else {
+            toast("继续同步：已收到 ${syncPages.size}/$syncTotal 张")
+        }
+        startScan()
+    }
+
+    private fun cancelSync() {
+        syncPages.clear()
+        syncTotal = 0
+        toast("已取消未完成的同步")
+    }
+
+    /** 扫码 / 图片导入的统一入口：同步包走合并流程，其它内容按单条密钥导入 */
+    private fun handleImportedText(raw: String, fallbackName: String, autoContinue: Boolean) {
+        if (SyncPackage.isPage(raw)) {
+            acceptSyncPage(raw, autoContinue)
+            return
+        }
+        importFromText(raw, fallbackName)
+    }
+
+    /**
+     * 收下一页同步包：没凑齐就提示继续扫（相机扫码会自动接着弹扫码界面），
+     * 凑齐后按「密钥已存在就跳过」合并 —— 只新增，绝不删改手机上已有的条目。
+     */
+    private fun acceptSyncPage(raw: String, autoContinue: Boolean) {
+        val page = try {
+            SyncPackage.parse(raw)
+        } catch (e: Exception) {
+            toast("同步包无法识别：" + (e.message ?: "格式错误"))
+            return
+        }
+
+        if (syncTotal != page.total) {   // 换成另一套同步包（总页数不同）→ 重新收集
+            syncPages.clear()
+            syncTotal = page.total
+        }
+        if (syncPages.containsKey(page.index)) {
+            toast("第 ${page.index}/${page.total} 张已经扫过了")
+        } else {
+            syncPages[page.index] = page
+        }
+
+        if (syncPages.size < syncTotal) {
+            toast("已收到 ${syncPages.size}/$syncTotal 张，继续扫下一张")
+            if (autoContinue) handler.postDelayed({ startScan() }, 600)
+            return
+        }
+
+        val incoming = (1..syncTotal).flatMap { syncPages[it]?.items ?: emptyList() }
+        syncPages.clear()
+        syncTotal = 0
+
+        var added = 0
+        var skipped = 0
+        for (item in incoming) {
+            if (entries.any { it.secret == item.secretBase64 }) {
+                skipped++
+                continue
+            }
+            entries.add(Entry(item.name, item.secretBase64, item.revocation,
+                item.type, item.digits, item.period, item.algorithm))
+            added++
+        }
+        if (added > 0) persist()
+        rebuild()
+        toast(if (skipped > 0) "同步完成：新增 $added 条，已存在 $skipped 条" else "同步完成：新增 $added 条")
     }
 
     // ---------------- 导入入口 ----------------
@@ -909,7 +1004,11 @@ e.revocation?.let { put("revocation", it) }
         val scanResult = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
         if (scanResult != null) {
             val contents = scanResult.contents
-            if (contents.isNullOrEmpty()) toast("已取消扫码") else importFromText(contents, "扫码导入")
+            when {
+                contents.isNullOrEmpty() ->
+                    toast(if (syncTotal > 0) "同步已暂停（已收到 ${syncPages.size}/$syncTotal 张）" else "已取消扫码")
+                else -> handleImportedText(contents, "扫码导入", true)
+            }
             return
         }
 
@@ -937,7 +1036,8 @@ e.revocation?.let { put("revocation", it) }
             toast("图片里没识别出二维码")
             return
         }
-        importFromText(decoded, "图片导入")
+        // 图片导入不自动接着弹扫码（可能是在相册里逐张选），收齐了才合并
+        handleImportedText(decoded, "图片导入", false)
     }
 
     override fun onDestroy() {

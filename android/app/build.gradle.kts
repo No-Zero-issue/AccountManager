@@ -2,6 +2,37 @@ plugins {
     id("com.android.application")
 }
 
+// ============================================================ 版本号
+// 默认与桌面端共用同一个数字：读仓库里的 AccountManager/version.h（版本唯一来源）
+//   versionName = 主.次.修订（和界面显示、EXE 文件属性一致）
+//   versionCode = 主*10000 + 次*100 + 修订（Android 要求只增不减）
+// 手机端要单独发版时，在 android/gradle.properties 里取消注释
+// androidVersionName / androidVersionCode 即可覆盖；只写其中一个也行，
+// 另一个仍从 version.h 取；两个都写了就完全不读 version.h。
+val androidVersionNameOverride = providers.gradleProperty("androidVersionName").orNull?.takeIf { it.isNotBlank() }
+val androidVersionCodeOverride = providers.gradleProperty("androidVersionCode").orNull?.takeIf { it.isNotBlank() }?.toInt()
+
+// 读 version.h 里的某个 #define（文件缺失 / 名字写错都直接报错，避免悄悄发出错版本号）
+fun versionNumberFromHeader(name: String): Int {
+    val headerFile = rootProject.file("../AccountManager/version.h")
+    check(headerFile.isFile) {
+        "找不到 ${headerFile.path}：请确认仓库结构完整，或在 android/gradle.properties 里设置 androidVersionName / androidVersionCode"
+    }
+    val matched = Regex("""^\s*#define\s+$name\s+(\d+)""", RegexOption.MULTILINE).find(headerFile.readText())
+    checkNotNull(matched) { "${headerFile.path} 里找不到 #define $name" }
+    return matched.groupValues[1].toInt()
+}
+
+// 只有需要同步时才读 version.h
+val syncedVersionNumbers: List<Int> by lazy {
+    listOf("APP_VERSION_MAJOR", "APP_VERSION_MINOR", "APP_VERSION_PATCH").map { versionNumberFromHeader(it) }
+}
+
+val appVersionName: String = androidVersionNameOverride
+    ?: syncedVersionNumbers.let { (major, minor, patch) -> "$major.$minor.$patch" }
+val appVersionCode: Int = androidVersionCodeOverride
+    ?: syncedVersionNumbers.let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }
+
 android {
     namespace = "com.accountmanager.steamguard"
     compileSdk = 37
@@ -27,8 +58,8 @@ android {
         applicationId = "com.accountmanager.steamguard"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
 
     compileOptions {

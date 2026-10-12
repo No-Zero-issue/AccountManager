@@ -31,7 +31,8 @@ bool SteamHttpsRequest(bool useGet, const std::wstring& host, const std::wstring
                        const std::string& formBody, SteamHttpResult& result) {
     result = SteamHttpResult{};
 
-    HINTERNET session = WinHttpOpen(L"AccountManager/1.0",
+    // User-Agent 里的版本号来自 version.h，随程序版本自动变化
+    HINTERNET session = WinHttpOpen(APP_USER_AGENT,
                                     WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                     WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) {

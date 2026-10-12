@@ -20,6 +20,7 @@
 
 #include "framework.h"
 #include "AccountManager.h"
+#include "version.h"   // 程序版本（唯一来源）：APP_VERSION_LABEL / APP_USER_AGENT 等
 #include <wrl.h>
 #include <wil/com.h>
 #include <WebView2.h>
