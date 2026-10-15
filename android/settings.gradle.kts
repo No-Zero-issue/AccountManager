@@ -11,5 +11,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "SteamTokenGenerator"
+rootProject.name = "2FA"
 include(":app")

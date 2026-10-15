@@ -184,11 +184,11 @@ msbuild AccountManager.sln /p:Configuration=Release /p:Platform=x64
 ```
 # 测试 + 调试版
 gradlew -p android testDebugUnitTest assembleDebug
-#   → android/app/build/outputs/apk/debug/app-debug.apk
+#   → android/app/build/outputs/apk/debug/2FA-debug.apk
 
 # 发布版（用 android/keystore/release.jks 签名）
 gradlew -p android testDebugUnitTest assembleRelease
-#   → android/app/build/outputs/apk/release/app-release.apk
+#   → android/app/build/outputs/apk/release/2FA.apk
 ```
 
 > 调试版与发布版**签名不同，无法互相覆盖安装**；换签名安装需先卸载，而这会**清空 App 内数据**。

@@ -68,6 +68,15 @@ android {
     }
 }
 
+// 产物改名：release -> 2FA.apk，其它变体 -> 2FA-<变体>.apk
+// 与 README「版本与发布」记录的产物路径保持一致，发布时不用再手动改名
+androidComponents {
+    onVariants { variant ->
+        val fileName = if (variant.name == "release") "2FA.apk" else "2FA-" + variant.name + ".apk"
+        variant.outputs.forEach { output -> output.outputFileName.set(fileName) }
+    }
+}
+
 
 dependencies {
     implementation("com.google.zxing:core:3.5.3")   // Apache-2.0：二维码解码/编码
