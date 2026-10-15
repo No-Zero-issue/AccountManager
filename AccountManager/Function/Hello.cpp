@@ -154,7 +154,10 @@ bool HelloSignChallenge(const std::vector<BYTE>& challenge, bool createIfMissing
 bool HelloFileExists() {
     std::error_code ec;
     std::filesystem::path path = GetHelloFilePath();
-    return std::filesystem::exists(path, ec) && std::filesystem::file_size(path, ec) > 0;
+    if (std::filesystem::exists(path, ec) && std::filesystem::file_size(path, ec) > 0) return true;
+    // 合并存储后 Hello 数据写在 AccountManager.json 的 hello 节（旧 hello.json 只是兼容入口）
+    json section = ReadDataSection("hello");
+    return section.is_object() && section.contains("challenge") && section.contains("data");
 }
 
 bool HelloIsBusy() {

@@ -269,7 +269,10 @@ bool VaultFileExists() {
     std::error_code ec;
     std::filesystem::path path = GetVaultFilePath();
     if (std::filesystem::exists(path, ec) && std::filesystem::file_size(path, ec) > 0) return true;
-    return ReadDataSection("hello").is_object();   // 也接受已合并进 AccountManager.json 的 hello 节
+    // 合并存储后保险库写在 AccountManager.json 的 vault 节（ReadDataSection 会先迁移旧 vault.json）。
+    // 这里必须查 vault 节：查 hello 节会让只用主密码、没开 Windows Hello 的用户被误判成首次运行。
+    json section = ReadDataSection("vault");
+    return section.is_object() && section.contains("kdf") && section.contains("data");
 }
 
 // 把旧的 Steam 账号文件（accounts.json）转换为通用条目，便于首次创建保险库时导入
