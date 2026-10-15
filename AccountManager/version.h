@@ -27,16 +27,16 @@
 // 改版本号只改这四行
 #define APP_VERSION_MAJOR 1
 #define APP_VERSION_MINOR 0
-#define APP_VERSION_PATCH 1
+#define APP_VERSION_PATCH 2
 #define APP_VERSION_BUILD 0
 
 // ============================================================ 给 .rc 用
 // VERSIONINFO 的数值字段（FILEVERSION / PRODUCTVERSION）：逗号分隔的四个数字
 #define APP_VERSION_COMMA APP_VERSION_MAJOR,APP_VERSION_MINOR,APP_VERSION_PATCH,APP_VERSION_BUILD
-// 界面显示用：主.次.修订，例如 "1.0.1"
-#define APP_VERSION_LABEL "1.0.1"
-// 完整版本：主.次.修订.构建，例如 "1.0.1.0"，用于 EXE 文件属性
-#define APP_VERSION_FULL "1.0.1.0"
+// 界面显示用：主.次.修订，例如 "1.0.2"
+#define APP_VERSION_LABEL "1.0.2"
+// 完整版本：主.次.修订.构建，例如 "1.0.2.0"，用于 EXE 文件属性
+#define APP_VERSION_FULL "1.0.2.0"
 
 // ============================================================ 给 C++ 用
 #ifdef __cplusplus
