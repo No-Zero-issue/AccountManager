@@ -14,21 +14,13 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 
-# Android（android/.gitignore 里另有细则）
-android/.gradle/
-android/build/
-android/app/build/
-android/local.properties
-android/.idea/
-
 # 私密文件：绝不提交
 vault.json
 hello.json
 config.json
 steam_enroll.log
 *.log
-android/keystore.properties
-android/keystore/*.jks
+keystore.properties
 *.jks
 *.keystore
 
