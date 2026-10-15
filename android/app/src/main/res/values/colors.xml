@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- 自适应图标的背景层：与手绘图标的黑底一致，两者拼接看不出接缝 -->
-    <color name="ic_launcher_background">#000000</color>
-</resources>

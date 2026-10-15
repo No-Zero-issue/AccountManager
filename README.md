@@ -169,32 +169,29 @@ msbuild AccountManager.sln /p:Configuration=Release /p:Platform=x64
 
 ## Android 手机端（2FA）
 
-目录 `android/`，独立 Kotlin 应用：**不联网、不碰账号**，只保存密钥并出码。
+手机端已经拆成**独立仓库**：<https://github.com/No-Zero-issue/2FA>（本地 Gitea 镜像 `http://localhost:3000/Sakiora/2FA`）。
+原先它在本仓库的 `android/` 目录，现在那边有自己的 `version.h`、README、构建与发版说明 —— 本仓库不再包含手机端代码。
+
+下面保留一份功能索引；**构建命令、产物路径、签名与版本号规则请看 2FA 仓库的 README**。
+
+两边必须一起改的只有一件事：**同步包的格式**（见「同步 2FA 到手机」一节），格式一改，两边的实现与单测都要跟着改。
 
 - **两种令牌**：Steam Guard（5 位字母）与**标准 TOTP**（6/7/8 位数字，SHA1/SHA256/SHA512）自动识别，共用倒计时与复制交互
 - 卡片式列表：大号动态码 + 剩余秒数 + 进度条（≤5 秒变橙），点卡片复制，长按改名 / 删除 / 看撤销码
 - **拖动排序**：卡片数字右侧有自绘拖动手柄，按住即可拖动改顺序 —— 拖动时被拖卡片**跟手浮动**、原位置塌成空槽、目标位置实时预览，其它卡片**实时让位**，松手立即写入加密存储；右上角菜单「编辑卡片」里同样用这套拖动交互
 - 右上角三条杆菜单：编辑卡片 / 从电脑同步 / 关于；右下角圆形＋：手动添加 / 扫描二维码 / 图片导入（「从电脑同步」见下文）
 - **从电脑同步**：扫桌面端「同步到手机」生成的二维码（多张时扫完一张会自动接着弹下一张；也能用「图片导入」逐张选），收齐后按**密钥去重**合并 —— 只新增，绝不删改手机上已有的条目；扫了一半退出可以「继续同步」，菜单里也会出现「取消未完成的同步（i/n）」
-- 密钥用 **Android Keystore + AES-256-GCM** 加密存本机（`filesDir/entries.bin`），「关于」页显示版本与项目地址（版本号默认与桌面端同步，见「版本与发布」一节）
+- 密钥用 **Android Keystore + AES-256-GCM** 加密存本机（`filesDir/entries.bin`），「关于」页显示版本与项目地址（版本号见 2FA 仓库根目录的 `version.h`）
 - **防丢数据**：写盘先写 `entries.bin.tmp` 再原子改名，覆盖前留一份 `entries.bin.bak`，主文件读不出来时自动回退到备份；启动解析失败时**保持原样**（不清空、不保存），不会把「半截列表」写回去
 - 启动器图标为手绘「手机 + 2FA + 锁」线稿：使用 Android 8+ **自适应图标**（黑底 + 白线稿前景，图案已留出安全边距，圆形 / 方形遮罩都不会切到），并附带传统方形 / 圆形多密度图标兜底
 - 算法与桌面端一致（HMAC-SHA1 + 26 字母表取 5 位），23 个单测含与桌面端相同的固定向量
 
 ```
-# 测试 + 调试版
-gradlew -p android testDebugUnitTest assembleDebug
-#   → android/app/build/outputs/apk/debug/2FA-debug.apk
-
-# 发布版（用 android/keystore/release.jks 签名）
-gradlew -p android testDebugUnitTest assembleRelease
-#   → android/app/build/outputs/apk/release/2FA.apk
+# 手机端已不在本仓库：构建命令与产物路径见 2FA 仓库
+#   https://github.com/No-Zero-issue/2FA
 ```
 
-> 调试版与发布版**签名不同，无法互相覆盖安装**；换签名安装需先卸载，而这会**清空 App 内数据**。
-> 签名密钥库不在版本控制中（`.gitignore` 有意排除），请自行备份 `android/keystore/release.jks` 与其中的密码。
-
-单元测试 23 个用例：与桌面端一致的固定向量、字母表 / 时间窗 / 周期、标准 TOTP 的 RFC 6238 向量、`.maFile`/Base64/otpauth 解析、非法输入拒绝、二维码「编码→解码」往返、同步包解析（含桌面端实际产物样本）。
+单元测试 23 个用例（在 2FA 仓库）：与桌面端一致的固定向量、字母表 / 时间窗 / 周期、标准 TOTP 的 RFC 6238 向量、`.maFile`/Base64/otpauth 解析、非法输入拒绝、二维码「编码→解码」往返、同步包解析（含桌面端实际产物样本）。
 
 ## 同步 2FA 到手机
 
@@ -215,7 +212,7 @@ AM2FA/1                                    ← 魔数 + 格式版本
 ```
 
 - 桌面端：`frontend/src/syncPackage.js`（打包 / 分页）
-- 手机端：`android/app/src/main/java/com/accountmanager/steamguard/SyncPackage.kt`（解析，复用 `SecretParser` 做 Base32→Base64）
+- 手机端：`app/src/main/java/com/accountmanager/steamguard/SyncPackage.kt`（在 [2FA 仓库](https://github.com/No-Zero-issue/2FA)，解析时复用 `SecretParser` 做 Base32→Base64）
 - 兼容性由 `SyncPackageTest` 兜底：测试里直接内嵌了一份桌面端真实生成的同步包
 
 ⚠️ 同步包等价于全部 2FA 密钥，别截图外传；扫完即关。
@@ -249,19 +246,20 @@ AM2FA/1                                    ← 魔数 + 格式版本
 - 给 `.rc` 用的版本号必须是**单个字符串字面量**（rc.exe 不支持 `"a" "b"` 拼接出现在对话框资源里），所以 `version.h` 里另有 `APP_VERSION_LABEL` / `APP_VERSION_FULL` 两个字符串要跟着数字一起改；忘了改的话，C++ 侧的 `static_assert` 会让编译直接失败并提示你。
 - `version.h` 保持 **UTF-8 带 BOM**、正文只用 ASCII：`.rc` 是 UTF-16，rc.exe 从被 `#include` 的文件里读中文会报错。
 
-### 手机端版本号：默认同步，可改独立
+### 手机端版本号：已独立
 
-`android/app/build.gradle.kts` 不再写死版本号：
+手机端拆到 [2FA 仓库](https://github.com/No-Zero-issue/2FA)后，版本号由**那边仓库根目录的 `version.h`** 决定：
 
-- **默认同步**：解析仓库里的 `AccountManager/version.h`，`versionName` 取**主.次.修订**（当前 `1.0.2`），`versionCode` 按 `主*10000 + 次*100 + 修订` 算（当前 `10002`，Android 要求只增不减）。
-- **改成独立**：在 `android/gradle.properties` 里取消注释 `androidVersionName` / `androidVersionCode`（例如手机端单独发个热修 `1.1` / `10001`）。只写一个也行，另一个仍从 `version.h` 取；两个都写了就完全不读 `version.h`，连 `android/` 目录单独复制出去也能构建。
-- 手机「关于」页显示的仍是系统里的 `versionName`（`packageManager` 读取），所以上面怎么改，界面就显示什么，Kotlin 侧不用动。
+- `versionName` 取**主.次.修订**，`versionCode` 按 `主*10000 + 次*100 + 修订` 算（Android 要求只增不减）。
+- 与本仓库的 `version.h` **不再联动** —— 桌面端发版不会再自动改变手机端版本号；两边各自维护。
+- 要临时用别的版本号，在 2FA 仓库的 `gradle.properties` 里取消注释 `androidVersionName` / `androidVersionCode`。
+- 手机「关于」页显示的仍是系统里的 `versionName`（`packageManager` 读取），Kotlin 侧不用动。
 
 桌面端所有状态集中在 EXE 同目录的**单个 `AccountManager.json`**（分区：`vault` / `hello` / `config`）。首次运行若检测到旧的 `vault.json` / `hello.json` / `config.json`，会自动合并进去；**旧文件保留不删**，可随时回滚。
 
 产物：
 - 桌面端 `x64/Release/AccountManager.exe` —— 图标是手绘「密码保险箱」线稿，含 16 / 24 / 32 / 48 / 64 / 128 / 256 七档，且**全部使用 32bpp BMP 条目**（`LoadIcon` 对 PNG 压缩条目的支持不可靠）
-- 手机端 `android/app/build/outputs/apk/release/2FA.apk` —— 图标是手绘「手机 + 2FA + 锁」线稿的自适应图标
+- 手机端 `2FA.apk` —— 在 [2FA 仓库](https://github.com/No-Zero-issue/2FA)构建（图标是手绘「手机 + 2FA + 锁」线稿的自适应图标）
 
 构建提示：改过 `frontend/src` 后必须 `npm.cmd run build` **并触碰 `AccountManager/AccountManager.rc`** 再编译，否则新界面进不了 EXE；详见「构建」一节的排错条目。
 
